@@ -1,0 +1,101 @@
+.menu-bar {
+    height: 30px;
+    background: var(--bg-secondary);
+    color: var(--fg-secondary);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    font-size: 13px;
+    user-select: none;
+    position: relative;
+    z-index: 100;
+    border-bottom: 1px solid var(--border-main);
+}
+
+.menu-logo {
+    margin-right: 12px;
+    font-weight: bold;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    filter: drop-shadow(0 0 4px rgba(0, 122, 204, 0.3));
+}
+
+.menu-trigger {
+    padding: 0 8px;
+    cursor: pointer;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.menu-trigger:hover,
+.menu-trigger.active {
+    background: var(--bg-item-hover);
+    color: var(--fg-primary);
+}
+
+.menu-dropdown {
+    position: absolute;
+    top: 28px;
+    left: 0;
+    background: rgba(30, 30, 30, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-main);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    min-width: 240px;
+    padding: 4px 0;
+    z-index: 200;
+    border-radius: 6px;
+    animation: menu-slide 0.2s ease-out;
+}
+
+@keyframes menu-slide {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.menu-item {
+    padding: 6px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    color: var(--fg-primary);
+    font-size: 13px;
+    margin: 0 4px;
+    border-radius: 4px;
+}
+
+.menu-item:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.menu-separator {
+    height: 1px;
+    background: var(--border-main);
+    margin: 4px 0;
+}
+
+.menu-shortcut {
+    font-size: 11px;
+    opacity: 0.5;
+    margin-left: 20px;
+}
+
+.menu-info {
+    margin-left: auto;
+    font-size: 12px;
+    opacity: 0.4;
+    font-weight: 500;
+}

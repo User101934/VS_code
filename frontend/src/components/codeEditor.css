@@ -1,0 +1,58 @@
+.editor-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--bg-editor);
+}
+
+/* Header is handled by Tabs/Breadcrumbs in IDELayout */
+.editor-header {
+    display: none;
+}
+
+/* Body */
+.editor-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+/* Line Numbers */
+.line-numbers {
+    width: 48px;
+    background: var(--bg-editor);
+    color: var(--fg-muted);
+    text-align: right;
+    padding: 12px 10px;
+    font-size: 12px;
+    user-select: none;
+    border-right: 1px solid transparent;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.line-numbers span {
+    display: block;
+    line-height: 22px;
+    opacity: 0.5;
+}
+
+/* Textarea */
+.editor-textarea {
+    flex: 1;
+    background: var(--bg-editor);
+    color: var(--fg-primary);
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 12px 8px;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 14px;
+    line-height: 22px;
+    tab-size: 4;
+    white-space: pre;
+    overflow-x: auto;
+}
+
+.editor-textarea::selection {
+    background: rgba(0, 122, 204, 0.4);
+}

@@ -1,0 +1,97 @@
+.status-bar {
+    height: 22px;
+    background: var(--bg-status-bar);
+    color: #fff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 12px;
+    user-select: none;
+    z-index: 1000;
+}
+
+/* Executing state */
+/* .status-bar.executing {
+    background: #a15e03;
+} */
+
+/* Sections */
+.status-left,
+.status-right {
+    display: flex;
+    align-items: center;
+    height: 100%;
+}
+
+/* Items */
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    height: 100%;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.status-item:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.status-item span {
+    white-space: nowrap;
+}
+
+.branch {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.errors {
+    gap: 4px;
+}
+
+.execution,
+.saving {
+    font-weight: 500;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Executing indicator */
+.status-executing {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 12px;
+}
+
+/* Spinner */
+.spin {
+    animation: spin 1s linear infinite;
+}
+
+.pulse {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
+}

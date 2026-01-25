@@ -1,0 +1,136 @@
+.db-explorer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    color: var(--vscode-foreground);
+    background-color: var(--vscode-sideBar-background);
+}
+
+.db-explorer-header {
+    padding: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+
+.db-explorer-header h4 {
+    margin: 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.db-action-btn {
+    background: none;
+    border: none;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.db-action-btn:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.db-connections-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.db-connection-item {
+    cursor: pointer;
+}
+
+.db-connection-header {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.db-connection-header:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.db-connection-children {
+    padding-left: 20px;
+}
+
+.db-item {
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.db-item:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+/* Modal Styles */
+.db-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.db-modal {
+    background: var(--vscode-editor-background);
+    color: var(--vscode-foreground);
+    padding: 20px;
+    border-radius: 6px;
+    width: 400px;
+    border: 1px solid var(--vscode-panel-border);
+}
+
+.db-modal h3 {
+    margin-top: 0;
+}
+
+.db-input {
+    width: 100%;
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border);
+    color: var(--vscode-input-foreground);
+    padding: 8px;
+    margin: 10px 0;
+    border-radius: 4px;
+}
+
+.db-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.db-btn {
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: none;
+}
+
+.db-btn-primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.db-btn-secondary {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+}

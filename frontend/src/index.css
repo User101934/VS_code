@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+
+:root {
+    /* Backgrounds */
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #181818;
+    --bg-sidebar: #181818;
+    --bg-activity-bar: #181818;
+    --bg-panel: #181818;
+    --bg-editor: #1e1e1e;
+    --bg-status-bar: #007acc;
+
+    /* Interactive States */
+    --bg-item-hover: #2a2d2e;
+    --bg-item-active: #37373d;
+    --bg-item-selected: #04395e;
+
+    /* Foregrounds */
+    --fg-primary: #cccccc;
+    --fg-secondary: #969696;
+    --fg-muted: #858585;
+    --fg-link: #3794ff;
+
+    /* Accents & Borders */
+    --accent: #007acc;
+    --focus-border: #007acc;
+    --border-main: #2b2b2b;
+    --border-focus: #007acc;
+
+    /* Lists */
+    --list-hover-bg: #2a2d2e;
+    --list-active-bg: #094771;
+    --list-active-fg: #ffffff;
+
+    /* Tabs */
+    --tab-active-bg: #1e1e1e;
+    --tab-inactive-bg: #181818;
+    --tab-border: #252526;
+
+    /* Scrollbars */
+    --scrollbar-thumb: #424242;
+    --scrollbar-thumb-hover: #4f4f4f;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--bg-primary);
+    color: var(--fg-primary);
+    height: 100vh;
+    overflow: hidden;
+}
+
+code,
+pre,
+.monaco-editor,
+.terminal-content {
+    font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+}
+
+#root {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Global Transitions */
+a,
+button,
+.clickable,
+svg {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+::selection {
+    background: rgba(0, 122, 204, 0.3);
+}
