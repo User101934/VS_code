@@ -95,18 +95,27 @@ export async function executeLocalCode(socket, payload) {
             const detectedPackages = detectPackages(sanitizedCode, 'python');
 
             if (detectedPackages.length > 0) {
-                socket.emit('output', `🔍 Detected Python packages: ${detectedPackages.join(', ')}\n`);
-                socket.emit('output', `📦 Ensuring packages are installed (this may take a moment)...\n`);
+                // Optimize user experience: Don't spam messages if packages are already there.
+                // We check first.
+                console.time("python-package-check");
+                const { libPath, newlyInstalled } = await ensurePythonPackages(detectedPackages);
+                console.timeEnd("python-package-check");
 
-                const libPath = await ensurePythonPackages(detectedPackages);
+                if (newlyInstalled) {
+                    socket.emit('output', `🔍 Detected new Python packages: ${detectedPackages.join(', ')}\n`);
+                    socket.emit('output', `📦 Installing packages (this may take a moment)...\n`);
+                    socket.emit('output', `✅ Packages installed.\n`);
+                } else {
+                    // specific verbose mode or just quiet?
+                    // Quiet is faster.
+                    // console.log("Packages already installed, skipping UI updates.");
+                }
 
                 // Add to PYTHONPATH
                 const currentPythonPath = process.env.PYTHONPATH || '';
                 extraEnv['PYTHONPATH'] = currentPythonPath
                     ? `${libPath}${path.delimiter}${currentPythonPath}`
                     : libPath;
-
-                socket.emit('output', `✅ Packages ready. Executing...\n`);
             }
         } catch (err) {
             socket.emit('output', `⚠️  Package installation warning: ${err.message}\n`);

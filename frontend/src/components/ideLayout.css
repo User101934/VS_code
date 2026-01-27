@@ -402,3 +402,13 @@
     font-size: 11px;
     letter-spacing: -0.2px;
 }
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}

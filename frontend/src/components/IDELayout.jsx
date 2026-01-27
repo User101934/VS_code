@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import io from "socket.io-client";
 import WebPreview from "./WebPreview";
-import { getFileLanguage } from "../utils/helpers";
+import { getFileLanguage, stripAnsi } from "../utils/helpers";
 import { LANGUAGES } from "../config/languages";
 import "./ideLayout.css";
 import "./activityBar.css";
@@ -78,6 +78,11 @@ export default function IDELayout() {
     /* ================= EXECUTION ================= */
 
     const executeFile = useCallback((name, content, langOverride = null) => {
+        if (isExecuting) {
+            alert("Code is already running. Please wait.");
+            return;
+        }
+
         const langKey = langOverride || getFileLanguage(name);
         setIsExecuting(true);
         setActivePanel("terminal");
@@ -97,10 +102,14 @@ export default function IDELayout() {
             ));
             setIsExecuting(false);
         }
-    }, [activeTerminalId]);
+    }, [activeTerminalId, isExecuting]);
 
     const handleRunCode = useCallback(() => {
         if (!activeFile) return;
+        if (isExecuting) {
+            alert("Code is already running. Please wait.");
+            return;
+        }
 
         setIsExecuting(true);
         setActivePanel("terminal");
@@ -120,7 +129,7 @@ export default function IDELayout() {
             ));
             setIsExecuting(false);
         }
-    }, [activeFile, activeTerminalId]);
+    }, [activeFile, activeTerminalId, isExecuting]);
 
     // --- AUTO-SAVE LOGIC ---
     useEffect(() => {
@@ -204,6 +213,8 @@ export default function IDELayout() {
 
         socketRef.current.on("connect", () => {
             console.log("[Socket] Connected to backend");
+            // Initialize PTY session
+            socketRef.current.emit("terminal:init");
         });
 
         socketRef.current.on("connect_error", (err) => {
@@ -211,10 +222,24 @@ export default function IDELayout() {
         });
 
         socketRef.current.on("output", data => {
+            // Check if it's a run code output or terminal output?
+            // "execute" uses "output" event.
+            // We should ideally separate them, but for now append to terminal.
             setTerminals(prev => prev.map(t =>
                 t.id === activeTerminalIdRef.current ? { ...t, output: [...t.output, data] } : t
             ));
         });
+
+        // Handle PTY output (streaming raw data)
+        socketRef.current.on("terminal:output", data => {
+            console.log("[Terminal Output]", data);
+            const lines = data.toString().split(/\r?\n/).map(stripAnsi);
+            setTerminals(prev => prev.map(t =>
+                t.id === activeTerminalIdRef.current ? { ...t, output: [...t.output, ...lines] } : t
+            ));
+        });
+
+
 
         socketRef.current.on("execution_complete", () => {
             setIsExecuting(false);
@@ -222,13 +247,17 @@ export default function IDELayout() {
 
         socketRef.current.on("error", errorMsg => {
             setTerminals(prev => prev.map(t =>
-                t.id === activeTerminalId ? { ...t, output: [...t.output, `\n❌ Error: ${errorMsg}\n`] } : t
+                t.id === activeTerminalIdRef.current ? { ...t, output: [...t.output, `\n❌ Error: ${errorMsg}\n`] } : t
             ));
             setIsExecuting(false);
         });
 
         return () => socketRef.current.disconnect();
     }, []);
+
+    // ...
+
+
 
     /* ================= FILE TREE ================= */
 
@@ -305,6 +334,18 @@ export default function IDELayout() {
         setContextMenu({ x: e.clientX, y: e.clientY, item });
     };
 
+    const getPathFromId = (items, id) => {
+        if (!id) return [];
+        for (const item of items) {
+            if (item.id === id) return [item.name];
+            if (item.children) {
+                const path = getPathFromId(item.children, id);
+                if (path) return [item.name, ...path];
+            }
+        }
+        return null;
+    };
+
     const handleCreateItem = (isDir) => {
         const name = prompt(`Enter ${isDir ? 'folder' : 'file'} name:`);
         if (!name) return;
@@ -317,6 +358,21 @@ export default function IDELayout() {
             content: isDir ? undefined : ""
         };
         setFiles(prev => addItem(prev, selectedFolderId, newItem));
+
+        // Sync to backend
+        const parentPathArr = getPathFromId(files, selectedFolderId) || [];
+        const fullPath = [...parentPathArr, name].join('/');
+
+        if (socketRef.current?.connected) {
+            if (isDir) {
+                // Use terminal command for mkdir (works in cmd/bash usually)
+                // Quote path for safety
+                socketRef.current.emit("terminal:input", `mkdir "${fullPath}"\n`);
+            } else {
+                // Use file API for files
+                socketRef.current.emit("file:save", { path: fullPath, content: "" });
+            }
+        }
     };
 
     const handleContextAction = (actionId, item) => {
@@ -427,53 +483,26 @@ export default function IDELayout() {
     };
 
     const handleTerminalCommand = cmd => {
-        const pathString = `~${currentPath.length > 0 ? '/' + currentPath.join('/') : ''}`;
-        setTerminals(prev => prev.map(t =>
-            t.id === activeTerminalId ? { ...t, output: [...t.output, `➜  ${pathString} ${cmd}`] } : t
-        ));
-
         const rawCmd = cmd.trim();
         if (!rawCmd) return;
 
-        // Improved parsing to handle quoted arguments (e.g., register-module analytics "Data Analytics")
-        const parts = (rawCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || []).map(p =>
-            (p.startsWith('"') && p.endsWith('"')) ? p.slice(1, -1) : p
-        );
-        if (parts.length === 0) return;
+        // Visual Echo
+        const pathString = `~${currentPath.length > 0 ? '/' + currentPath.join('/') : ''}`;
+        setTerminals(prev => prev.map(t =>
+            t.id === activeTerminalId ? { ...t, output: [...t.output, `➜  ${pathString} ${rawCmd}`] } : t
+        ));
 
-        let command = parts[0].toLowerCase();
-        let args = parts.slice(1);
-        let fileName = args[0];
+        // Parse command
+        // Basic parsing for "cd foo", "mkdir bar"
+        const parts = rawCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+        const command = parts[0]?.toLowerCase();
+        const args = parts.slice(1).map(a => a.startsWith('"') && a.endsWith('"') ? a.slice(1, -1) : a);
+        const fileName = args[0];
 
         const items = getCurrentItems(files, currentPath);
 
-        // 1. Direct File Execution (e.g., typing 'kk.py')
-        const directFile = items.find(i => i.name.toLowerCase() === rawCmd.toLowerCase() && !i.isDir);
-        if (directFile) {
-            executeFile(directFile.name, directFile.content);
-            return;
-        }
-
-        // 2. Handle "language.file" typo (e.g., 'python.kk.py')
-        if (!fileName && rawCmd.includes('.')) {
-            const languages = ['python', 'py', 'node', 'js', 'java', 'javac', 'gcc', 'g++', 'cpp', 'go', 'php', 'ruby', 'rb'];
-            for (const lang of languages) {
-                if (rawCmd.startsWith(lang + '.')) {
-                    command = lang;
-                    fileName = rawCmd.substring(lang.length + 1);
-                    break;
-                }
-            }
-        }
-
-        if (['clear', 'cls'].includes(command)) {
-            setTerminals(prev => prev.map(t =>
-                t.id === activeTerminalId ? { ...t, output: [] } : t
-            ));
-            return;
-        }
-
-        if (['ls', 'dir'].includes(command)) {
+        // --- Local Navigation (Simulated) ---
+        if (['ls', 'dir', 'll'].includes(command)) {
             const output = items.map(f => f.name + (f.isDir ? '/' : '')).join('  ');
             setTerminals(prev => prev.map(t =>
                 t.id === activeTerminalId ? { ...t, output: [...t.output, output || '(empty)'] } : t
@@ -484,15 +513,24 @@ export default function IDELayout() {
         if (command === 'cd') {
             if (!args[0] || args[0] === '~') {
                 setCurrentPath([]);
+                // Sync backend to root (if possible, or just emit cd ~ aka cd projectroot?)
+                // Backend is jailed to project root.
+                // Assuming backend root == virtual root.
+                // Emit nothing or 'cd /'? 'cd' in windows prints cwd.
+                // We assume backend starts at root. If we are at root, do nothing?
+                // Or best effort emit.
+                if (socketRef.current?.connected) socketRef.current.emit("terminal:input", "cd " + (socketRef.current.projectRoot || ".") + "\n");
                 return;
             }
             if (args[0] === '..') {
                 setCurrentPath(prev => prev.slice(0, -1));
+                if (socketRef.current?.connected) socketRef.current.emit("terminal:input", "cd ..\n");
                 return;
             }
             const target = items.find(i => i.name === args[0] && i.isDir);
             if (target) {
                 setCurrentPath(prev => [...prev, args[0]]);
+                if (socketRef.current?.connected) socketRef.current.emit("terminal:input", `cd "${args[0]}"\n`);
             } else {
                 setTerminals(prev => prev.map(t =>
                     t.id === activeTerminalId ? { ...t, output: [...t.output, `cd: no such directory: ${args[0]}`] } : t
@@ -501,155 +539,75 @@ export default function IDELayout() {
             return;
         }
 
+        if (['clear', 'cls'].includes(command)) {
+            setTerminals(prev => prev.map(t =>
+                t.id === activeTerminalId ? { ...t, output: [] } : t
+            ));
+            return;
+        }
+
+        // --- Local File Management (Optional: update UI + Sync) ---
+        // If user creates file in terminal, we want it to show in Explorer.
         if (command === 'mkdir' && args[0]) {
             const newItem = { id: generateId(), name: args[0], isDir: true, isOpen: true, children: [] };
             setFiles(prev => addItem(prev, getCurrentFolderId(files, currentPath), newItem));
+            if (socketRef.current?.connected) socketRef.current.emit("terminal:input", rawCmd + '\n');
             return;
         }
-
         if (command === 'touch' && args[0]) {
             const newItem = { id: generateId(), name: args[0], isDir: false, content: "" };
             setFiles(prev => addItem(prev, getCurrentFolderId(files, currentPath), newItem));
+            // For touch, on windows 'type nul > filename' or just emit raw?
+            // 'touch' isn't windows CMD. 'TerminalManager' had alias logic? No.
+            // Backend uses shell. Powershell has touch (ni). CMD doesn't.
+            // If backend is CMD, 'touch' fails.
+            // If I want to support 'touch' backend, I should alias it in TerminalManager.
+            // But for now, UI update is key. Backend sync might fail if command unknown.
+            // I'll emit anyway.
+            if (socketRef.current?.connected) socketRef.current.emit("terminal:input", rawCmd + '\n');
             return;
         }
 
-        if (command === 'rm' && args[0]) {
-            const target = items.find(i => i.name === args[0]);
-            if (target) {
-                setFiles(prev => deleteItem(prev, target.id));
-                const isTabOpen = openFiles.find(f => f.id === target.id);
-                if (isTabOpen) {
-                    const e = { stopPropagation: () => { } };
-                    closeFile(e, target.id);
-                }
-            } else {
-                setTerminals(prev => prev.map(t =>
-                    t.id === activeTerminalId ? { ...t, output: [...t.output, `rm: ${args[0]}: no such file or directory`] } : t
-                ));
-            }
-            return;
-        }
-
-        if (command === 'cat' && args[0]) {
-            const target = items.find(i => i.name === args[0] && !i.isDir);
-            if (target) {
-                setTerminals(prev => prev.map(t =>
-                    t.id === activeTerminalId ? { ...t, output: [...t.output, target.content || "(empty)"] } : t
-                ));
-            } else {
-                setTerminals(prev => prev.map(t =>
-                    t.id === activeTerminalId ? { ...t, output: [...t.output, `cat: ${args[0]}: no such file`] } : t
-                ));
-            }
-            return;
-        }
-
-        // --- Execution Commands ---
-        let executionLanguage = null;
-
-        if (['python', 'python3', 'py'].includes(command)) executionLanguage = 'python';
-        else if (['node', 'js'].includes(command)) executionLanguage = 'javascript';
-        else if (['ts-node', 'ts'].includes(command)) executionLanguage = 'typescript';
-        else if (['java', 'javac'].includes(command)) executionLanguage = 'java';
-        else if (['gcc', 'c'].includes(command)) executionLanguage = 'c';
-        else if (['g++', 'cpp'].includes(command)) executionLanguage = 'cpp';
-        else if (['dotnet', 'cs'].includes(command)) executionLanguage = 'csharp';
-        else if (command === 'go') {
-            executionLanguage = 'go';
-            if (args[0] === 'run') fileName = args[1];
-        }
-        else if (['rustc', 'rs'].includes(command)) executionLanguage = 'rust';
-        else if (['php'].includes(command)) executionLanguage = 'php';
-        else if (['ruby', 'rb'].includes(command)) executionLanguage = 'ruby';
-        else if (['swift'].includes(command)) executionLanguage = 'swift';
-        else if (['kotlinc', 'kt'].includes(command)) executionLanguage = 'kotlin';
-        else if (['scala'].includes(command)) executionLanguage = 'scala';
-        else if (['bash', 'sh'].includes(command)) executionLanguage = 'bash';
-        else if (['pwsh', 'ps1'].includes(command)) executionLanguage = 'powershell';
-
-        if (command === 'register-module' && args[0]) {
-            const modId = args[0].toLowerCase();
-            const modTitle = args[1] || modId.charAt(0).toUpperCase() + modId.slice(1);
-
-            if (modules.find(m => m.id === modId)) {
-                setTerminals(prev => prev.map(t =>
-                    t.id === activeTerminalId ? { ...t, output: [...t.output, `Error: Module '${modId}' is already registered.`] } : t
-                ));
-                return;
-            }
-
-            const newModule = {
-                id: modId,
-                title: modTitle,
-                icon: Package, // Default icon for new modules
-                component: 'Dynamic'
-            };
-
-            setModules(prev => [...prev, newModule]);
+        // --- Everything else: Pass-through (git, npm, python, etc) ---
+        if (socketRef.current?.connected) {
+            socketRef.current.emit("terminal:input", rawCmd + '\n');
+        } else {
             setTerminals(prev => prev.map(t =>
-                t.id === activeTerminalId ? { ...t, output: [...t.output, `✅ Module '${modTitle}' registered successfully!`, `✨ Check the new icon in the Activity Bar.`] } : t
+                t.id === activeTerminalId ? { ...t, output: [...t.output, "Error: disconnected"] } : t
             ));
-            return;
         }
-
-        // Handle npm commands
-        if (command === 'npm' || command === 'npx') {
-            if (socketRef.current?.connected) {
-                socketRef.current.emit("execute", {
-                    language: 'terminal',
-                    command: command,
-                    args: args
-                });
-            } else {
-                setTerminals(prev => prev.map(t =>
-                    t.id === activeTerminalId ? { ...t, output: [...t.output, "\n❌ Error: Socket not connected.\n"] } : t
-                ));
-            }
-            return;
-        }
-
-        // Handle node version/help commands (node -v, node --version, node -h, etc.)
-        if (command === 'node' && args[0] && (args[0].startsWith('-') || args[0].startsWith('--'))) {
-            if (socketRef.current?.connected) {
-                socketRef.current.emit("execute", {
-                    language: 'terminal',
-                    command: 'node',
-                    args: args
-                });
-            } else {
-                setTerminals(prev => prev.map(t =>
-                    t.id === activeTerminalId ? { ...t, output: [...t.output, "\n❌ Error: Socket not connected.\n"] } : t
-                ));
-            }
-            return;
-        }
-
-        if (executionLanguage && fileName) {
-            const target = items.find(i => i.name === fileName && !i.isDir);
-
-            if (target) {
-                executeFile(target.name, target.content, executionLanguage);
-            } else {
-                setTerminals(prev => prev.map(t =>
-                    t.id === activeTerminalId ? { ...t, output: [...t.output, `Error: File '${fileName}' not found.`] } : t
-                ));
-            }
-            return;
-        }
-
-        if (command === 'help') {
-            setTerminals(prev => prev.map(t =>
-                t.id === activeTerminalId ? { ...t, output: [...t.output, 'Available: ls, cd, mkdir, touch, rm, cat, python, node, java, gcc, go, clear, help'] } : t
-            ));
-            return;
-        }
-
-        setTerminals(prev => prev.map(t =>
-            t.id === activeTerminalId ? { ...t, output: [...t.output, `Command not found: ${command}`] } : t
-        ));
     };
 
 
+
+
+
+    const saveFile = () => {
+        if (!activeFileId) return;
+        const file = openFiles.find(f => f.id === activeFileId);
+        if (!file) return;
+
+        const pathArr = getPathFromId(files, activeFileId);
+        if (pathArr) {
+            const fullPath = pathArr.join('/');
+            if (socketRef.current?.connected) {
+                socketRef.current.emit("file:save", { path: fullPath, content: file.content });
+                console.log("[IDELayout] Saved file:", fullPath);
+                // Optional: Add visual indicator
+            }
+        }
+    };
+
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                saveFile();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [activeFileId, files, openFiles]);
 
     /* ================= RENDER ================= */
 
@@ -689,7 +647,7 @@ export default function IDELayout() {
                             <DBExplorer onSelectTable={(id, db, table) => setActiveDB({ id, db, table })} />
                         )}
 
-                        {/* Placeholder for future dynamic modules */}
+                        {/* Placeholder for dynamic modules */}
                         {!['explorer', 'search', 'database'].includes(activeSidebarView) && (
                             <div className="empty-editor" style={{ opacity: 0.5, fontSize: '13px', padding: 20 }}>
                                 <Package size={40} style={{ marginBottom: 10 }} />
@@ -729,8 +687,17 @@ export default function IDELayout() {
                                     {showPreview ? <EyeOff size={14} color="var(--accent)" /> : <Eye size={14} />}
                                 </div>
                             )}
-                            <Play size={14} onClick={handleRunCode} />
-                            <Save size={14} />
+                            {isExecuting ? (
+                                <div style={{ cursor: 'not-allowed', display: 'flex' }} title="Execution in progress...">
+                                    <div className="spinner" style={{
+                                        width: '14px', height: '14px', border: '2px solid var(--text-secondary)',
+                                        borderTop: '2px solid var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite'
+                                    }}></div>
+                                </div>
+                            ) : (
+                                <Play size={14} onClick={handleRunCode} title="Run Code (F5)" style={{ cursor: 'pointer' }} />
+                            )}
+                            <Save size={14} onClick={saveFile} style={{ cursor: 'pointer' }} title="Save (Ctrl+S)" />
                             <MoreHorizontal size={14} />
                         </div>
                     </div>
@@ -837,6 +804,7 @@ export default function IDELayout() {
                                     output={terminals.find(t => t.id === activeTerminalId)?.output || []}
                                     onCommand={handleTerminalCommand}
                                     path={`~${currentPath.length > 0 ? '/' + currentPath.join('/') : ''}`}
+                                    isExecuting={isExecuting}
                                 />
                             )}
                         </div>

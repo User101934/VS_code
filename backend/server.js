@@ -1,10 +1,14 @@
-import 'dotenv/config';
-import express from 'express';
-import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import { Server as socketIO } from 'socket.io';
 import cors from 'cors';
 import { executeCode } from './src/execution/executor.js';
 import dbRoutes from './src/routes/dbRoutes.js';
+import TerminalManager from './src/utils/TerminalManager.js';
 
 const app = express();
 app.use(express.json());
@@ -85,9 +89,40 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('input', (data) => {
-        if (sessionData.pty && !sessionData.pty.destroyed) {
-            sessionData.pty.write(data);
+    // --- TERMINAL EVENTS ---
+    socket.on('terminal:init', () => {
+        // Initialize session (sets CWD)
+        TerminalManager.createSession(socket.id);
+        console.log(`[${socket.id}] Terminal session initialized (Spawn Mode)`);
+    });
+
+    socket.on('terminal:input', (data) => {
+        // Handle input dispatch (Command or Stdin)
+        TerminalManager.handleInput(socket.id, data, socket);
+    });
+
+    socket.on('terminal:resize', ({ cols, rows }) => {
+        // No-op for spawn mode but kept for compatibility
+    });
+
+    // --- FILE OPERATIONS ---
+    socket.on('file:save', (data) => {
+        try {
+            // Root is one level up from backend/server.js
+            const projectRoot = path.resolve(__dirname, '..');
+            // Prevent directory traversal
+            const safePath = path.normalize(data.path).replace(/^(\.\.[\/\\])+/, '');
+            const fullPath = path.join(projectRoot, safePath);
+
+            // Ensure directory exists
+            fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+
+            fs.writeFileSync(fullPath, data.content || '');
+            console.log(`[File] Saved: ${safePath}`);
+            socket.emit('file:saved', { path: data.path });
+        } catch (err) {
+            console.error(`[File] Save error:`, err);
+            socket.emit('error', `Failed to save file: ${err.message}`);
         }
     });
 
@@ -96,6 +131,10 @@ io.on('connection', (socket) => {
         if (sessionData.cleanupHandler) {
             await sessionData.cleanupHandler();
         }
+
+        // Use TerminalManager clean up
+        TerminalManager.kill(socket.id);
+
         activeSessions.delete(socket.id);
     });
 });

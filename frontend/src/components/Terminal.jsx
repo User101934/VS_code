@@ -1,7 +1,7 @@
 import React, { useState, useRef, useLayoutEffect } from "react";
 import "./terminal.css";
 
-export default function Terminal({ output, onCommand, path = "~" }) {
+export default function Terminal({ output, onCommand, path = "~", isExecuting = false }) {
     const endRef = useRef(null);
     const inputRef = useRef(null);
     const [input, setInput] = useState("");
@@ -11,21 +11,24 @@ export default function Terminal({ output, onCommand, path = "~" }) {
     }, [output]);
 
     const handleKeyDown = (e) => {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !isExecuting) {
             onCommand(input);
             setInput("");
         }
     };
 
     const handleClick = () => {
-        inputRef.current?.focus();
+        if (!isExecuting) {
+            inputRef.current?.focus();
+        }
     };
 
     return (
-        <div className="terminal-container" onClick={handleClick}>
+        <div className="terminal-container" onClick={handleClick} style={isExecuting ? { cursor: 'wait' } : {}}>
             {/* Header */}
             <div className="terminal-header">
                 <span>Terminal</span>
+                {isExecuting && <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.7 }}>Running...</span>}
             </div>
 
             {/* Body */}
@@ -51,7 +54,7 @@ export default function Terminal({ output, onCommand, path = "~" }) {
                 ))}
 
                 {/* Input */}
-                <div className="terminal-input">
+                <div className="terminal-input" style={{ opacity: isExecuting ? 0.5 : 1 }}>
                     <span className="prompt">➜</span>
                     <span className="path">{path}</span>
                     <input
@@ -61,7 +64,9 @@ export default function Terminal({ output, onCommand, path = "~" }) {
                         onKeyDown={handleKeyDown}
                         spellCheck="false"
                         autoComplete="off"
-                        autoFocus
+                        autoFocus={!isExecuting}
+                        disabled={isExecuting}
+                        placeholder={isExecuting ? "Waiting for process..." : ""}
                     />
                 </div>
 

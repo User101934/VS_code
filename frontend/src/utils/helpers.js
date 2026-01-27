@@ -15,3 +15,7 @@ export const getFileIcon = (filename) => {
 export const generateId = () => {
     return `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 };
+
+export const stripAnsi = (str) => {
+    return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+};

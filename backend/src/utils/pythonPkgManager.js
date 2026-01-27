@@ -11,34 +11,52 @@ import os from 'os';
 // Persistent directory for user python libraries
 // In production, this should probably be configurable or outside the source tree
 const USER_LIB_DIR = path.join(process.cwd(), 'user_libs', 'python');
+const MANIFEST_FILE = path.join(USER_LIB_DIR, 'installed_packages.json');
 
 export async function ensurePythonPackages(packages) {
     if (!packages || packages.length === 0) {
-        return USER_LIB_DIR;
+        return { libPath: USER_LIB_DIR, newlyInstalled: false };
     }
 
     // Ensure lib directory exists
     await fs.mkdir(USER_LIB_DIR, { recursive: true });
 
     // Filter out packages that definitely shouldn't be installed via pip
-    // (Additional safety check on top of packageDetector)
     const validPackages = packages.filter(p => !p.startsWith('_'));
 
     if (validPackages.length === 0) {
-        return USER_LIB_DIR;
+        return { libPath: USER_LIB_DIR, newlyInstalled: false };
     }
 
-    console.log(`[PythonPkgManager] Ensuring packages are installed: ${validPackages.join(', ')}`);
+    // --- MANIFEST CHECK ---
+    let installedPackages = [];
+    try {
+        const manifestContent = await fs.readFile(MANIFEST_FILE, 'utf-8');
+        installedPackages = JSON.parse(manifestContent);
+    } catch (err) {
+        // Manifest doesn't exist or is invalid, assume empty
+        installedPackages = [];
+    }
 
-    // For now, we'll try to install all requested packages.
-    // Pip is smart enough to skip already satisfied requirements,
-    // but running it every time might add a slight delay.
-    // Optimization: Check for package existence before running pip?
-    // For now, rely on pip's cache and speed.
+    // Find packages that are NOT in the manifest
+    const newPackages = validPackages.filter(p => !installedPackages.includes(p));
+
+    if (newPackages.length === 0) {
+        // All good, skip installation
+        return { libPath: USER_LIB_DIR, newlyInstalled: false };
+    }
+
+    console.log(`[PythonPkgManager] Installing new packages: ${newPackages.join(', ')}`);
 
     try {
-        await installPackagesRefined(validPackages);
-        return USER_LIB_DIR;
+        // Install ONLY the new packages
+        await installPackagesRefined(newPackages);
+
+        // Update Manifest
+        const updatedList = [...new Set([...installedPackages, ...newPackages])];
+        await fs.writeFile(MANIFEST_FILE, JSON.stringify(updatedList, null, 2));
+
+        return { libPath: USER_LIB_DIR, newlyInstalled: true };
     } catch (error) {
         console.error(`[PythonPkgManager] Installation failed: ${error.message}`);
         throw error; // Let executor handle the error
