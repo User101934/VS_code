@@ -13,8 +13,9 @@ class TerminalManager {
     // Initialize a session with default CWD
     createSession(socketId, socket) {
         if (!this.sessions[socketId]) {
-            // Default to Project Root (D:\teachgrid_vs) to match virtual file tree
-            const root = path.resolve(process.cwd(), '..');
+            // Default to Temp Workspace
+            const root = path.join(os.tmpdir(), 'teachgrid-workspace');
+            if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
             this.sessions[socketId] = {
                 cwd: root,
                 projectRoot: root,
@@ -75,13 +76,13 @@ class TerminalManager {
 
             // SANDBOX CHECK
             if (!newPath.startsWith(session.projectRoot)) {
-                socket.emit('terminal:output', `Error: Access denied (Sandbox Restriction). Cannot navigate outside project root.\r\n`);
+                socket.emit('output', `Error: Access denied (Sandbox Restriction). Cannot navigate outside project root.\r\n`);
                 return;
             }
 
             fs.access(newPath, fs.constants.F_OK | fs.constants.R_OK, (err) => {
                 if (err) {
-                    socket.emit('terminal:output', `cd: no such file or directory: ${targetDir}\r\n`);
+                    socket.emit('output', `cd: no such file or directory: ${targetDir}\r\n`);
                 } else {
                     // Update session CWD
                     session.cwd = newPath;
@@ -97,7 +98,7 @@ class TerminalManager {
 
         // --- Handle 'cls' / 'clear' ---
         if (trimmedCmd === 'cls' || trimmedCmd === 'clear') {
-            socket.emit('terminal:output', '\x1b[2J\x1b[0f'); // ANSI clear
+            socket.emit('output', '\x1b[2J\x1b[0f'); // ANSI clear
             return;
         }
 
@@ -110,26 +111,28 @@ class TerminalManager {
             });
 
             session.process = proc; // Track active process for kill/stdin
+            socket.emit('terminal:status', { busy: true });
 
             proc.stdout.on('data', (data) => {
-                socket.emit('terminal:output', data.toString());
+                socket.emit('output', data.toString());
             });
 
             proc.stderr.on('data', (data) => {
-                socket.emit('terminal:output', data.toString());
+                socket.emit('output', data.toString());
             });
 
             proc.on('close', (code) => {
                 session.process = null;
+                socket.emit('terminal:status', { busy: false });
             });
 
             proc.on('error', (err) => {
-                socket.emit('terminal:output', `Error spawning command: ${err.message}\r\n`);
+                socket.emit('output', `Error spawning command: ${err.message}\r\n`);
                 session.process = null;
+                socket.emit('terminal:status', { busy: false });
             });
-
         } catch (e) {
-            socket.emit('terminal:output', `Failed to execute: ${e.message}\r\n`);
+            socket.emit('output', `Failed to execute: ${e.message}\r\n`);
         }
     }
 

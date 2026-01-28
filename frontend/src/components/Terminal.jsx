@@ -1,7 +1,8 @@
 import React, { useState, useRef, useLayoutEffect } from "react";
+import { Plus, Trash2, SplitSquareHorizontal, X } from "lucide-react";
 import "./terminal.css";
 
-export default function Terminal({ output, onCommand, path = "~", isExecuting = false }) {
+export default function Terminal({ output, onCommand, onClear, onClose, path = "~", busy = false }) {
     const endRef = useRef(null);
     const inputRef = useRef(null);
     const [input, setInput] = useState("");
@@ -11,24 +12,29 @@ export default function Terminal({ output, onCommand, path = "~", isExecuting = 
     }, [output]);
 
     const handleKeyDown = (e) => {
-        if (e.key === "Enter" && !isExecuting) {
+        if (e.key === "Enter" && !busy) {
             onCommand(input);
             setInput("");
         }
     };
 
     const handleClick = () => {
-        if (!isExecuting) {
-            inputRef.current?.focus();
-        }
+        if (!busy) inputRef.current?.focus();
     };
 
     return (
-        <div className="terminal-container" onClick={handleClick} style={isExecuting ? { cursor: 'wait' } : {}}>
-            {/* Header */}
+        <div className="terminal-container" onClick={handleClick}>
+            {/* Header omitted for brevity */}
             <div className="terminal-header">
-                <span>Terminal</span>
-                {isExecuting && <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.7 }}>Running...</span>}
+                <div className="terminal-header-left">
+                    <span>TERMINAL</span>
+                </div>
+                <div className="terminal-header-actions">
+                    <Plus size={14} className="terminal-action-icon" title="New Terminal" />
+                    <Trash2 size={14} className="terminal-action-icon" title="Clear Terminal" onClick={onClear} />
+                    <SplitSquareHorizontal size={14} className="terminal-action-icon" title="Split Terminal" />
+                    <X size={14} className="terminal-action-icon" title="Kill Terminal" onClick={onClose} />
+                </div>
             </div>
 
             {/* Body */}
@@ -53,22 +59,27 @@ export default function Terminal({ output, onCommand, path = "~", isExecuting = 
                     </div>
                 ))}
 
-                {/* Input */}
-                <div className="terminal-input" style={{ opacity: isExecuting ? 0.5 : 1 }}>
-                    <span className="prompt">➜</span>
-                    <span className="path">{path}</span>
-                    <input
-                        ref={inputRef}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        spellCheck="false"
-                        autoComplete="off"
-                        autoFocus={!isExecuting}
-                        disabled={isExecuting}
-                        placeholder={isExecuting ? "Waiting for process..." : ""}
-                    />
-                </div>
+                {/* Input - Hidden when busy, mirroring VS Code */}
+                {!busy ? (
+                    <div className="terminal-input">
+                        <span className="prompt">➜</span>
+                        <span className="path">{path}</span>
+                        <input
+                            ref={inputRef}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            spellCheck="false"
+                            autoComplete="off"
+                            autoFocus
+                        />
+                    </div>
+                ) : (
+                    <div className="terminal-busy">
+                        <span className="spinner-small"></span>
+                        <span style={{ marginLeft: '8px', opacity: 0.5, fontSize: '12px' }}>Running...</span>
+                    </div>
+                )}
 
                 <div ref={endRef} />
             </div>

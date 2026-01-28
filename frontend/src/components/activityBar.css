@@ -5,8 +5,8 @@
     flex-direction: column;
     justify-content: space-between;
     align-items: center;
-    border-right: 1px solid var(--border-main);
-    z-index: 10;
+    border-right: 1px solid #2b2b2b;
+    z-index: 100;
 }
 
 .activity-bar-top,
@@ -24,31 +24,29 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    color: var(--fg-muted);
-    transition: color 0.2s;
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.15s ease;
 }
 
 .activity-item:hover {
-    color: var(--fg-primary);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .activity-item.active {
-    color: var(--fg-primary);
+    color: #ffffff;
 }
 
-.activity-item.active .active-indicator {
+.activity-item.active::before {
+    content: '';
     position: absolute;
     left: 0;
-    top: 0;
-    bottom: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 24px;
     width: 2px;
-    background: var(--accent);
+    background: #ffffff;
 }
 
 .activity-item svg {
-    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.activity-item:hover svg {
-    transform: scale(1.1);
+    transition: opacity 0.15s ease;
 }

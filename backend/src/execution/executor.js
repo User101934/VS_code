@@ -3,10 +3,21 @@ import { executePistonCode } from './pistonExecutor.js';
 import { LANGUAGES } from '../config/languages.js';
 
 export async function executeCode(socket, payload, sessionData) {
-    const { language } = payload;
-    const mode = process.env.EXECUTION_MODE || 'local';
+    const { language, executionMode } = payload;
+    let mode = executionMode || process.env.EXECUTION_MODE || 'auto';
 
-    console.log(`[Executor] Language: ${language}, Mode: ${mode}`);
+    // Smart Routing Logic: 
+    // "Heavy" languages (with local dependency management) default to Local.
+    // Others default to Piston for broad support.
+    if (mode === 'auto') {
+        if (['python', 'javascript', 'java'].includes(language)) {
+            mode = 'local';
+        } else {
+            mode = 'piston';
+        }
+    }
+
+    console.log(`[Executor] Language: ${language}, Selected Mode: ${mode}`);
 
     if (language === 'terminal') {
         console.log('[Executor] Terminal command detected, routing to localExecutor');

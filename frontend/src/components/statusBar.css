@@ -1,20 +1,15 @@
 .status-bar {
     height: 22px;
-    background: var(--bg-status-bar);
+    background: var(--accent);
     color: #fff;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 12px;
+    padding: 0;
     font-size: 12px;
     user-select: none;
     z-index: 1000;
 }
-
-/* Executing state */
-/* .status-bar.executing {
-    background: #a15e03;
-} */
 
 /* Sections */
 .status-left,
@@ -29,14 +24,14 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 10px;
+    padding: 0 12px;
     height: 100%;
     cursor: pointer;
     transition: background 0.1s;
 }
 
 .status-item:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.12);
 }
 
 .status-item span {

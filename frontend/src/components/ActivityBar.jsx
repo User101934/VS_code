@@ -35,7 +35,6 @@ function ActivityItem({ icon: Icon, active, onClick, title }) {
             onClick={onClick}
             title={title}
         >
-            {active && <div className="active-indicator" />}
             <Icon size={24} />
         </div>
     );

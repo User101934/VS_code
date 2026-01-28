@@ -48,6 +48,7 @@ export default function CodeEditor({ activeFile, onCodeChange }) {
                         setCode(value);
                         onCodeChange?.(value);
                     }}
+
                     options={{
                         fontSize: 14,
                         minimap: { enabled: true },

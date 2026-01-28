@@ -21,7 +21,7 @@ export async function executeLocalCode(socket, payload) {
         socket.emit('output', `➜ Running: ${cmdToRun} ${argsToRun.join(' ')}\n`);
 
         const childProcess = spawn(cmdToRun, argsToRun, {
-            cwd: process.cwd(), // Run in current working directory of backend
+            cwd: path.join(os.tmpdir(), 'teachgrid-workspace'),
             shell: true
         });
 

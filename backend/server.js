@@ -1,14 +1,19 @@
+import 'dotenv/config';
+import express from 'express';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 import { Server as socketIO } from 'socket.io';
 import cors from 'cors';
 import { executeCode } from './src/execution/executor.js';
 import dbRoutes from './src/routes/dbRoutes.js';
 import TerminalManager from './src/utils/TerminalManager.js';
+import StorageService from './src/services/StorageService.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json());
@@ -16,6 +21,7 @@ const server = http.createServer(app);
 
 const allowedOrigins = [
     'http://localhost:3000',
+    'http://localhost:3001',
     'http://localhost:3002',
     process.env.FRONTEND_URL
 ].filter(Boolean);
@@ -66,7 +72,6 @@ io.on('connection', (socket) => {
                 fileName: payload.fileName
             });
 
-            // Terminal commands don't need code or fileName
             if (payload.language === 'terminal') {
                 if (!payload.command) {
                     socket.emit('error', 'Missing required field: command');
@@ -79,9 +84,7 @@ io.on('connection', (socket) => {
                 }
             }
 
-            console.log(`[Backend] Processing execute for ${payload.fileName} (${payload.language})`);
             await executeCode(socket, payload, sessionData);
-
         } catch (error) {
             console.error(`[${socket.id}] Execution error:`, error);
             socket.emit('error', error.message);
@@ -89,40 +92,100 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- TERMINAL EVENTS ---
     socket.on('terminal:init', () => {
-        // Initialize session (sets CWD)
         TerminalManager.createSession(socket.id);
-        console.log(`[${socket.id}] Terminal session initialized (Spawn Mode)`);
+        console.log(`[${socket.id}] Terminal session initialized`);
     });
 
     socket.on('terminal:input', (data) => {
-        // Handle input dispatch (Command or Stdin)
         TerminalManager.handleInput(socket.id, data, socket);
     });
 
-    socket.on('terminal:resize', ({ cols, rows }) => {
-        // No-op for spawn mode but kept for compatibility
+    // --- DB-BACKED FILE OPERATIONS ---
+
+    socket.on('files:list', async () => {
+        try {
+            const tree = await StorageService.listFiles();
+            socket.emit('files:list:response', tree || []);
+        } catch (err) {
+            console.error("Error listing files:", err);
+            socket.emit('error', "Failed to list files from database");
+        }
     });
 
-    // --- FILE OPERATIONS ---
-    socket.on('file:save', (data) => {
+    socket.on('file:read', async (data) => {
         try {
-            // Root is one level up from backend/server.js
-            const projectRoot = path.resolve(__dirname, '..');
-            // Prevent directory traversal
-            const safePath = path.normalize(data.path).replace(/^(\.\.[\/\\])+/, '');
-            const fullPath = path.join(projectRoot, safePath);
-
-            // Ensure directory exists
-            fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-
-            fs.writeFileSync(fullPath, data.content || '');
-            console.log(`[File] Saved: ${safePath}`);
-            socket.emit('file:saved', { path: data.path });
+            const { path: filePath } = data;
+            const content = await StorageService.readFile(filePath);
+            socket.emit('file:read:response', { path: filePath, content });
         } catch (err) {
-            console.error(`[File] Save error:`, err);
-            socket.emit('error', `Failed to save file: ${err.message}`);
+            console.error("Error reading file:", err);
+            socket.emit('error', "Failed to read file from database");
+        }
+    });
+
+    socket.on('file:save', async (data) => {
+        try {
+            const { path: filePath, content, isDir } = data;
+            if (!filePath) return;
+
+            const name = filePath.split('/').pop();
+
+            // Sync to local disk for execution engine compatibility
+            const projectRoot = path.join(os.tmpdir(), 'teachgrid-workspace');
+            const fullLocalPath = path.join(projectRoot, filePath);
+            const localDir = isDir ? fullLocalPath : path.dirname(fullLocalPath);
+
+            if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+            if (!isDir) fs.writeFileSync(fullLocalPath, content);
+
+            await StorageService.saveFile(filePath, name, content, isDir || false);
+            socket.emit('file:saved', { path: filePath });
+        } catch (err) {
+            console.error("Error saving file:", err);
+            socket.emit('error', "Failed to save file to database");
+        }
+    });
+
+    socket.on('file:delete', async (data) => {
+        try {
+            const { path: filePath } = data;
+
+            // Local disk cleanup
+            const projectRoot = path.join(os.tmpdir(), 'teachgrid-workspace');
+            const fullLocalPath = path.join(projectRoot, filePath);
+            if (fs.existsSync(fullLocalPath)) {
+                fs.rmSync(fullLocalPath, { recursive: true, force: true });
+            }
+
+            await StorageService.deleteFile(filePath);
+            socket.emit('file:deleted', { path: filePath });
+        } catch (err) {
+            console.error("Error deleting file:", err);
+            socket.emit('error', "Failed to delete from database");
+        }
+    });
+
+    socket.on('file:rename', async (data) => {
+        try {
+            const { oldPath, newPath } = data;
+
+            // Local disk rename
+            const projectRoot = path.join(os.tmpdir(), 'teachgrid-workspace');
+            const fullOldPath = path.join(projectRoot, oldPath);
+            const fullNewPath = path.join(projectRoot, newPath);
+            if (fs.existsSync(fullOldPath)) {
+                if (!fs.existsSync(path.dirname(fullNewPath))) fs.mkdirSync(path.dirname(fullNewPath), { recursive: true });
+                fs.renameSync(fullOldPath, fullNewPath);
+            }
+
+            await StorageService.renameFile(oldPath, newPath);
+
+
+            socket.emit('file:renamed', { oldPath, newPath });
+        } catch (err) {
+            console.error("Error renaming file:", err);
+            socket.emit('error', "Failed to rename in database");
         }
     });
 
@@ -131,10 +194,7 @@ io.on('connection', (socket) => {
         if (sessionData.cleanupHandler) {
             await sessionData.cleanupHandler();
         }
-
-        // Use TerminalManager clean up
         TerminalManager.kill(socket.id);
-
         activeSessions.delete(socket.id);
     });
 });
@@ -154,21 +214,18 @@ process.on('SIGTERM', async () => {
 
 const PORT = process.env.PORT || 3001;
 
-server.listen(PORT, () => {
-    console.log(`Teachgrid Backend running on port ${PORT}`);
-    console.log(`Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+StorageService.init().then(() => {
+    server.listen(PORT, () => {
+        console.log(`Teachgrid Backend running on port ${PORT}`);
+    });
+}).catch(err => {
+    console.error('Failed to initialize storage:', err);
+    process.exit(1);
 });
 
-// Handle port already in use error
 server.on('error', (error) => {
     if (error.code === 'EADDRINUSE') {
-        console.log(`\n✅ Port ${PORT} is already in use - Backend server is already running!`);
-        console.log(`   This is normal if you started the server using start_app.bat`);
-        console.log(`   Your application is available at:`);
-        console.log(`   - Frontend: http://localhost:3000`);
-        console.log(`   - Backend:  http://localhost:${PORT}`);
-        console.log(`\n   No action needed - both servers are working! 🚀\n`);
-        process.exit(0); // Exit gracefully
+        process.exit(0);
     } else {
         console.error('Server error:', error);
         process.exit(1);
