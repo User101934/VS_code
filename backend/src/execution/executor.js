@@ -6,6 +6,9 @@ export async function executeCode(socket, payload, sessionData) {
     const { language, executionMode } = payload;
     let mode = executionMode || process.env.EXECUTION_MODE || 'auto';
 
+    console.log(`[Executor] 🔍 Received executionMode from frontend: "${executionMode}"`);
+    console.log(`[Executor] 🔍 Initial mode value: "${mode}"`);
+
     // Smart Routing Logic: 
     // "Heavy" languages (with local dependency management) default to Local.
     // Others default to Piston for broad support.
@@ -15,9 +18,10 @@ export async function executeCode(socket, payload, sessionData) {
         } else {
             mode = 'piston';
         }
+        console.log(`[Executor] ⚙️  Auto-routing ${language} → ${mode}`);
     }
 
-    console.log(`[Executor] Language: ${language}, Selected Mode: ${mode}`);
+    console.log(`[Executor] ✅ Final execution mode: ${mode.toUpperCase()}`);
 
     if (language === 'terminal') {
         console.log('[Executor] Terminal command detected, routing to localExecutor');

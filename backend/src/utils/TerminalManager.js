@@ -1,4 +1,3 @@
-
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -6,7 +5,35 @@ import os from 'os';
 
 class TerminalManager {
     constructor() {
-        this.sessions = {}; // socketId -> { cwd: string, process: ChildProcess | null }
+        this.sessions = {}; // socketId -> { cwd: string, process: ChildProcess | null, initialOutputReceived: boolean }
+    }
+
+    // Filter out Windows CMD header noise
+    filterOutput(data, session) {
+        let cleanedData = data;
+
+        // On first output from a command, skip the Windows header
+        if (!session.initialOutputReceived) {
+            // Remove Windows version banner and copyright
+            cleanedData = cleanedData.replace(/Microsoft Windows \[Version [^\]]+\]/g, '');
+            cleanedData = cleanedData.replace(/\(c\) Microsoft Corporation\. All rights reserved\./g, '');
+
+            // Remove ANSI escape sequences for window title
+            cleanedData = cleanedData.replace(/\x1b\]0;[^\x07]*\x07/g, '');
+
+            // Remove the initial path prompt (C:\Users\...\Temp\teachgrid-workspace>)
+            cleanedData = cleanedData.replace(/[A-Z]:\\[^>]+>/g, '');
+
+            // Remove extra newlines
+            cleanedData = cleanedData.replace(/^\s+/, '');
+
+            session.initialOutputReceived = true;
+        }
+
+        // Always filter out ANSI window title sequences
+        cleanedData = cleanedData.replace(/\x1b\]0;[^\x07]*\x07/g, '');
+
+        return cleanedData;
     }
 
     // Initialize a session with default CWD
@@ -19,7 +46,8 @@ class TerminalManager {
             this.sessions[socketId] = {
                 cwd: root,
                 projectRoot: root,
-                process: null
+                process: null,
+                initialOutputReceived: false
             };
             if (socket) {
                 socket.emit('terminal:cwd', '');
@@ -111,14 +139,21 @@ class TerminalManager {
             });
 
             session.process = proc; // Track active process for kill/stdin
+            session.initialOutputReceived = false; // Reset for new command
             socket.emit('terminal:status', { busy: true });
 
             proc.stdout.on('data', (data) => {
-                socket.emit('output', data.toString());
+                const cleaned = this.filterOutput(data.toString(), session);
+                if (cleaned.trim()) {
+                    socket.emit('output', cleaned);
+                }
             });
 
             proc.stderr.on('data', (data) => {
-                socket.emit('output', data.toString());
+                const cleaned = this.filterOutput(data.toString(), session);
+                if (cleaned.trim()) {
+                    socket.emit('output', cleaned);
+                }
             });
 
             proc.on('close', (code) => {

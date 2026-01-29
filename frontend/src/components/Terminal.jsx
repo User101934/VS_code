@@ -12,14 +12,14 @@ export default function Terminal({ output, onCommand, onClear, onClose, path = "
     }, [output]);
 
     const handleKeyDown = (e) => {
-        if (e.key === "Enter" && !busy) {
+        if (e.key === "Enter") {
             onCommand(input);
             setInput("");
         }
     };
 
     const handleClick = () => {
-        if (!busy) inputRef.current?.focus();
+        inputRef.current?.focus();
     };
 
     return (
@@ -59,22 +59,22 @@ export default function Terminal({ output, onCommand, onClear, onClose, path = "
                     </div>
                 ))}
 
-                {/* Input - Hidden when busy, mirroring VS Code */}
-                {!busy ? (
-                    <div className="terminal-input">
-                        <span className="prompt">➜</span>
-                        <span className="path">{path}</span>
-                        <input
-                            ref={inputRef}
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            spellCheck="false"
-                            autoComplete="off"
-                            autoFocus
-                        />
-                    </div>
-                ) : (
+                {/* Input - Always visible to allow interaction with running processes */}
+                <div className="terminal-input">
+                    <span className="prompt">➜</span>
+                    <span className="path">{path}</span>
+                    <input
+                        ref={inputRef}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        spellCheck="false"
+                        autoComplete="off"
+                        autoFocus
+                    />
+                </div>
+
+                {busy && (
                     <div className="terminal-busy">
                         <span className="spinner-small"></span>
                         <span style={{ marginLeft: '8px', opacity: 0.5, fontSize: '12px' }}>Running...</span>

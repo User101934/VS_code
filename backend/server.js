@@ -93,7 +93,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('terminal:init', () => {
-        TerminalManager.createSession(socket.id);
+        TerminalManager.createSession(socket.id, socket);
         console.log(`[${socket.id}] Terminal session initialized`);
     });
 

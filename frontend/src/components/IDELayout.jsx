@@ -174,6 +174,7 @@ export default function IDELayout() {
         ));
 
         if (socketRef.current?.connected) {
+            console.log(`[Frontend] 🚀 Sending execution request with mode: "${executionMode}"`);
             socketRef.current.emit("execute", {
                 language: getFileLanguage(activeFile.name),
                 code: activeFile.content,
@@ -422,10 +423,24 @@ export default function IDELayout() {
 
     const handleTerminalCommand = cmd => {
         const rawCmd = cmd.trim();
+        // Allow empty commands if sending newline to stdin
+        if (rawCmd === '' && terminals.find(t => t.id === activeTerminalId)?.busy) {
+            if (socketRef.current?.connected) socketRef.current.emit("terminal:input", '\n');
+            return;
+        }
         if (!rawCmd) return;
-        setTerminals(prev => prev.map(t =>
-            t.id === activeTerminalId ? { ...t, output: [...t.output, `➜  ~ ${rawCmd}`] } : t
-        ));
+
+        setTerminals(prev => prev.map(t => {
+            if (t.id === activeTerminalId) {
+                // If busy, we are sending stdin, so don't show the prompt "➜ ~"
+                // Just show the input command itself as if typed
+                const isBusy = t.busy;
+                const logLine = isBusy ? `${rawCmd}` : `➜  ~ ${rawCmd}`;
+                return { ...t, output: [...t.output, logLine] };
+            }
+            return t;
+        }));
+
         if (socketRef.current?.connected) socketRef.current.emit("terminal:input", rawCmd + '\n');
     };
 
