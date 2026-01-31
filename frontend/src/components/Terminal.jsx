@@ -15,6 +15,14 @@ export default function Terminal({ output, onCommand, onClear, onClose, path = "
         if (e.key === "Enter") {
             onCommand(input);
             setInput("");
+        } else if (e.ctrlKey && e.key === "c") {
+            // If user has text selected, let browser copy.
+            // detecting selection is tricky in React without ref to window/document, 
+            // but usually we want SIGINT in terminal context.
+            if (!window.getSelection().toString()) {
+                e.preventDefault();
+                onCommand("\x03"); // Send SIGINT
+            }
         }
     };
 
@@ -61,8 +69,8 @@ export default function Terminal({ output, onCommand, onClear, onClose, path = "
 
                 {/* Input - Always visible to allow interaction with running processes */}
                 <div className="terminal-input">
-                    <span className="prompt">➜</span>
-                    <span className="path">{path}</span>
+                    {!busy && <span className="prompt">➜</span>}
+                    {!busy && <span className="path">{path}</span>}
                     <input
                         ref={inputRef}
                         value={input}
@@ -74,12 +82,6 @@ export default function Terminal({ output, onCommand, onClear, onClose, path = "
                     />
                 </div>
 
-                {busy && (
-                    <div className="terminal-busy">
-                        <span className="spinner-small"></span>
-                        <span style={{ marginLeft: '8px', opacity: 0.5, fontSize: '12px' }}>Running...</span>
-                    </div>
-                )}
 
                 <div ref={endRef} />
             </div>

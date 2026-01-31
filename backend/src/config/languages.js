@@ -8,7 +8,7 @@ export const LANGUAGES = {
         workDir: '/workspace',
         file: 'main.py',
         command: ['python', '-u', 'main.py'],
-        localCommand: ['python', '-u', 'main.py'],
+        localCommand: ['python', '-X', 'utf8', '-u', 'main.py'],
         timeout: 30000
     },
     javascript: {
@@ -32,7 +32,7 @@ export const LANGUAGES = {
         workDir: '/workspace',
         file: 'Main.java',
         command: ['bash', '-c', 'javac Main.java && java Main'],
-        localCommand: ['javac Main.java && java Main'],
+        localCommand: ['javac -encoding UTF-8 Main.java && java -Dfile.encoding=UTF-8 Main'],
         timeout: 45000
     },
     c: {

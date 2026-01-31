@@ -98,7 +98,17 @@ io.on('connection', (socket) => {
     });
 
     socket.on('terminal:input', (data) => {
-        TerminalManager.handleInput(socket.id, data, socket);
+        if (socket._ptyProcess) {
+            // If a code execution PTY is active, send input there (interactive mode)
+            try {
+                socket._ptyProcess.write(data);
+            } catch (err) {
+                console.error("Error writing to PTY:", err);
+            }
+        } else {
+            // Otherwise, handle as a shell command (ls, cd, etc.)
+            TerminalManager.handleInput(socket.id, data, socket);
+        }
     });
 
     // --- DB-BACKED FILE OPERATIONS ---

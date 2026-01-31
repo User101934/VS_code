@@ -56,26 +56,15 @@ export async function executeLocalCode(socket, payload) {
         }
     }
 
-    // ---------------- TEMP WORKSPACE ----------------
-    const tempDir = path.join(os.tmpdir(), `teachgrid_${socket.id}_${Date.now()}`);
+    // ---------------- WORKSPACE ----------------
+    // Use the shared workspace so files are persistent and match the terminal's view
+    const tempDir = path.join(os.tmpdir(), 'teachgrid-workspace');
     await fs.mkdir(tempDir, { recursive: true });
 
     const filePath = path.join(tempDir, fileName);
     await fs.writeFile(filePath, codeToExecute);
 
-    socket.emit('output', `▶ Executing ${fileName} (interactive mode)...\n`);
-
     // ---------------- PTY EXECUTION ----------------
-
-    const shell = process.platform === 'win32' ? 'cmd.exe' : 'bash';
-
-    const ptyProcess = pty.spawn(shell, [], {
-        name: 'xterm-color',
-        cols: 80,
-        rows: 30,
-        cwd: tempDir,
-        env: process.env
-    });
 
     const defaultFileName = langConfig.file;
     const defaultBaseName = path.parse(defaultFileName).name;
@@ -92,23 +81,70 @@ export async function executeLocalCode(socket, payload) {
 
     const finalCommand = commandList.join(' ');
 
-    // Stream output
-    ptyProcess.onData(data => {
-        socket.emit('output', data);
+    const shell = process.platform === 'win32' ? 'cmd.exe' : 'bash';
+    const args = process.platform === 'win32' ? ['/C', finalCommand] : ['-c', finalCommand];
+
+    // Set encoding for Python to handle Unicode characters on Windows
+    const env = {
+        ...process.env,
+        LANG: 'en_US.UTF-8',
+        LC_ALL: 'en_US.UTF-8'
+    };
+
+    if (language === 'python') {
+        env.PYTHONIOENCODING = 'utf-8';
+        env.PYTHONUTF8 = '1';
+    } else if (language === 'java') {
+        env.JAVA_TOOL_OPTIONS = '-Dfile.encoding=UTF-8';
+    }
+
+    const ptyProcess = pty.spawn(shell, args, {
+        name: 'xterm-color',
+        cols: 80,
+        rows: 30,
+        cwd: tempDir,
+        env: env
     });
 
+    let initialOutputReceived = false;
+    const filterOutput = (data) => {
+        let cleanedData = data;
+        // Strip ANSI OSC window title sequences (e.g. ]0;C:\Windows\SYSTEM32\cmd.exe)
+        // These can appear even with /C if ConPTY is active
+        cleanedData = cleanedData.replace(/\x1b\]0;.*?\x07/g, '');
+
+        if (!initialOutputReceived) {
+            cleanedData = cleanedData.replace(/Microsoft Windows \[Version [^\]]+\]/g, '');
+            cleanedData = cleanedData.replace(/\(c\) Microsoft Corporation\. All rights reserved\./g, '');
+            cleanedData = cleanedData.replace(/^\s+/, '');
+            initialOutputReceived = true;
+        }
+        return cleanedData;
+    };
+
+    // Stream output
+    ptyProcess.onData(data => {
+        const cleaned = filterOutput(data);
+        if (cleaned.trim() || cleaned.includes('\n')) {
+            socket.emit('output', cleaned);
+        }
+    });
+
+    // Notify frontend that terminal is busy (program running)
+    socket.emit('terminal:status', { busy: true });
+
     ptyProcess.onExit(async () => {
+        socket._ptyProcess = null; // CRITICAL: Clear the reference so subsequent inputs go to shell
         socket.emit('execution_complete');
+        socket.emit('terminal:status', { busy: false });
         try {
-            await fs.rm(tempDir, { recursive: true, force: true });
+            // DO NOT delete tempDir (workspace), as it is shared. 
+            // Only clean up bundled temp dirs if they exist.
             if (bundleTempDir) await cleanupBundle(bundleTempDir);
         } catch (e) {
             console.error('Cleanup error:', e);
         }
     });
-
-    // Run program inside PTY
-    ptyProcess.write(finalCommand + '\r');
 
     // Attach PTY to socket so frontend can send user input
     socket._ptyProcess = ptyProcess;

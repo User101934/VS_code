@@ -17,5 +17,7 @@ export const generateId = () => {
 };
 
 export const stripAnsi = (str) => {
-    return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+    // Robust ANSI regex to handle all modern terminal codes (colors, cursor, etc.)
+    // Includes support for 'm', 'K', 'H', and other common terminators.
+    return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g, '');
 };

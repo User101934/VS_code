@@ -138,6 +138,8 @@
     align-items: center;
     margin-top: 6px;
     padding-bottom: 12px;
+    white-space: nowrap;
+    flex-wrap: nowrap;
 }
 
 .terminal-input input {

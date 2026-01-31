@@ -170,7 +170,7 @@ export default function IDELayout() {
         setIsExecuting(true);
         setActivePanel("terminal");
         setTerminals(prev => prev.map(t =>
-            t.id === activeTerminalId ? { ...t, output: [...t.output, `▶ Executing ${activeFile.name}...`] } : t
+            t.id === activeTerminalId ? { ...t, output: [...t.output, `▶ Executing ${activeFile.name}...`], busy: true } : t
         ));
 
         if (socketRef.current?.connected) {
@@ -432,16 +432,27 @@ export default function IDELayout() {
 
         setTerminals(prev => prev.map(t => {
             if (t.id === activeTerminalId) {
-                // If busy, we are sending stdin, so don't show the prompt "➜ ~"
-                // Just show the input command itself as if typed
-                const isBusy = t.busy;
-                const logLine = isBusy ? `${rawCmd}` : `➜  ~ ${rawCmd}`;
+                // If busy, we are sending stdin to a running process (which usually echoes back).
+                // So DO NOT print it locally to avoid double echo.
+                if (t.busy) {
+                    return t;
+                }
+                // If not busy, it's a shell command, so show the prompt line.
+                const logLine = `➜  ~ ${rawCmd}`;
                 return { ...t, output: [...t.output, logLine] };
             }
             return t;
         }));
 
-        if (socketRef.current?.connected) socketRef.current.emit("terminal:input", rawCmd + '\n');
+        if (socketRef.current?.connected) {
+            // If it's a special signal like (Ctrl+C), send as is.
+            if (rawCmd === '\x03') {
+                socketRef.current.emit("terminal:input", rawCmd);
+            } else {
+                // Otherwise append newline specifically
+                socketRef.current.emit("terminal:input", rawCmd + '\n');
+            }
+        }
     };
 
     const commands = [
