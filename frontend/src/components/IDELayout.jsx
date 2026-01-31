@@ -162,6 +162,22 @@ export default function IDELayout() {
 
     const handleRunCode = useCallback(() => {
         if (!activeFile) return;
+
+        // --- WEB INTERCEPTOR ---
+        // If it's a web file, open preview instead of running on backend
+        const ext = activeFile.name.split('.').pop().toLowerCase();
+        if (['html', 'htm', 'jsx', 'tsx', 'vue', 'svelte'].includes(ext)) {
+            setShowPreview(true);
+            setActivePanel("terminal");
+            setTerminals(prev => prev.map(t =>
+                t.id === activeTerminalId ? {
+                    ...t,
+                    output: [...t.output, `▶ Starting Web Preview for ${activeFile.name}...`]
+                } : t
+            ));
+            return;
+        }
+
         if (isExecuting) {
             alert("Code is already running. Please wait.");
             return;
@@ -331,6 +347,12 @@ export default function IDELayout() {
             setTerminals(prev => prev.map(t => t.id === activeTerminalIdRef.current ? { ...t, busy } : t));
         });
 
+        socketRef.current.on("terminal:clear", () => {
+            setTerminals(prev => prev.map(t =>
+                t.id === activeTerminalIdRef.current ? { ...t, output: [] } : t
+            ));
+        });
+
         socketRef.current.on("error", errorMsg => {
             setTerminals(prev => prev.map(t =>
                 t.id === activeTerminalIdRef.current ? { ...t, output: [...t.output, `\n❌ Error: ${errorMsg}\n`] } : t
@@ -370,7 +392,7 @@ export default function IDELayout() {
 
     /* ================= RENDER HELPERS ================= */
 
-    const renderTree = (items, level = 0) =>
+    const renderTree = (items, level = 0, parentId = null) =>
         items.map(item => (
             <div key={item.id}>
                 <div
@@ -378,12 +400,15 @@ export default function IDELayout() {
                         } ${selectedFolderId === item.id ? "selected" : ""}`}
                     style={{ paddingLeft: `${level * 14 + 12}px` }}
                     onContextMenu={(e) => handleContextMenu(e, item)}
-                    onClick={() => {
+                    onClick={(e) => {
+                        e.stopPropagation(); // Prevent bubbling to background
                         if (item.isDir) {
                             setFiles(prev => toggleFolderRecursive(prev, item.id));
                             setSelectedFolderId(item.id);
                         } else {
                             openFile(item);
+                            // Set context to the parent folder when a file is clicked
+                            setSelectedFolderId(parentId);
                         }
                     }}
                 >
@@ -397,7 +422,7 @@ export default function IDELayout() {
                     />
                 </div>
                 {item.isDir && item.isOpen && item.children && (
-                    <div className="tree-children">{renderTree(item.children, level + 1)}</div>
+                    <div className="tree-children">{renderTree(item.children, level + 1, item.id)}</div>
                 )}
             </div>
         ));
@@ -482,7 +507,10 @@ export default function IDELayout() {
                                 </div>
                             )}
                         </header>
-                        <div className="sidebar-tree">
+                        <div className="sidebar-tree" onClick={(e) => {
+                            // If clicking empty space (not a tree item), reset selection to root
+                            if (e.target === e.currentTarget) setSelectedFolderId(null);
+                        }}>
                             {activeSidebarView === "explorer" && renderTree(files)}
                             {activeSidebarView === "search" && <SearchView files={files} onFileOpen={openFile} />}
                             {activeSidebarView === "database" && <DBExplorer onSelectTable={(id, db, table) => setActiveDB({ id, db, table })} />}
@@ -630,6 +658,7 @@ export default function IDELayout() {
                             <div className="side-pane preview-pane">
                                 <WebPreview
                                     fileName={activeFile.name}
+                                    fullPath={getPathFromId(files, activeFileId)?.join('/')}
                                     content={activeFile.content}
                                     files={files}
                                 />

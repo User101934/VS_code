@@ -1,68 +1,44 @@
-import pg from 'pg';
+import { supabase } from '../config/supabaseClient.js';
 import dotenv from 'dotenv';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import chokidar from 'chokidar';
 
 dotenv.config();
 
-const { Pool } = pg;
-
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL
-});
+const DEFAULT_USER_ID = 'user_system';
 
 class StorageService {
     async init() {
-        // 1. Connect to default 'postgres' to ensure the target DB exists
-        const adminPool = new Pool({
-            connectionString: process.env.DATABASE_URL.replace('/teachgrid_autosave', '/postgres')
-        });
+        console.log('[StorageService] Initializing Supabase storage...');
 
-        const adminClient = await adminPool.connect();
         try {
-            const res = await adminClient.query("SELECT 1 FROM pg_database WHERE datname='teachgrid_autosave'");
-            if (res.rowCount === 0) {
-                console.log('[StorageService] Creating database teachgrid_autosave...');
-                await adminClient.query('CREATE DATABASE teachgrid_autosave');
-            }
-        } finally {
-            adminClient.release();
-            await adminPool.end();
-        }
+            const { count, error } = await supabase
+                .from('workspace_files')
+                .select('*', { count: 'exact', head: true })
+                .eq('user_id', DEFAULT_USER_ID);
 
-        // 2. Initialize tables in the target DB
-        const client = await pool.connect();
-        try {
-            await client.query(`
-                CREATE TABLE IF NOT EXISTS workspace_files (
-                    path TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    content TEXT,
-                    is_dir BOOLEAN NOT NULL,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            `);
-            console.log('[StorageService] PostgreSQL Table initialized');
+            if (error) throw error;
 
-            // 3. Migration: If DB is empty, sync from local disk
-            const rowCheck = await client.query('SELECT count(*) FROM workspace_files');
-            console.log(`[StorageService] Current DB row count: ${rowCheck.rows[0].count}`);
-            if (parseInt(rowCheck.rows[0].count) <= 1) { // Allow 1 for partial previous attempts
+            console.log(`[StorageService] Current Supabase row count for ${DEFAULT_USER_ID}: ${count}`);
+
+            if (count === 0) {
                 console.log('[StorageService] Starting disk-to-DB migration...');
                 const projectRoot = path.join(os.tmpdir(), 'teachgrid-workspace');
                 if (fs.existsSync(projectRoot)) {
                     await this.migrateFromDisk(projectRoot, '');
                     console.log('[StorageService] Migration complete!');
                 } else {
-                    console.log('[StorageService] Temp workspace not found at', projectRoot);
+                    console.log('[StorageService] Temp workspace not found, skipping migration.');
+                    fs.mkdirSync(projectRoot, { recursive: true });
                 }
             }
+
+            // Start file watcher for real-time sync (crucial for terminal use)
+            this.startWatcher();
         } catch (err) {
-            console.error('[StorageService] Initialization error stack:', err.stack);
-            throw err;
-        } finally {
-            client.release();
+            console.error('[StorageService] Initialization error:', err.message);
         }
     }
 
@@ -70,9 +46,10 @@ class StorageService {
         const items = fs.readdirSync(absPath);
         for (const item of items) {
             try {
+                if (item === 'node_modules' || item === '.git') continue; // Skip heavy folders
+
                 const itemAbs = path.join(absPath, item);
                 const itemRel = relPath ? `${relPath}/${item}` : item;
-                console.log(`[Migration] Processing: ${itemRel}`);
                 const stats = fs.statSync(itemAbs);
                 const isDir = stats.isDirectory();
 
@@ -82,7 +59,6 @@ class StorageService {
                 }
 
                 await this.saveFile(itemRel, item, content, isDir);
-                console.log(`[Migration] Synced: ${itemRel}`);
 
                 if (isDir) {
                     await this.migrateFromDisk(itemAbs, itemRel);
@@ -94,64 +70,129 @@ class StorageService {
     }
 
     async listFiles() {
-        const res = await pool.query('SELECT * FROM workspace_files ORDER BY is_dir DESC, path ASC');
-        return this.buildTree(res.rows);
+        const { data, error } = await supabase
+            .from('workspace_files')
+            .select('*')
+            .eq('user_id', DEFAULT_USER_ID)
+            .order('is_dir', { ascending: false })
+            .order('path', { ascending: true });
+
+        if (error) throw error;
+        return this.buildTree(data);
     }
 
     async saveFile(filePath, name, content, isDir) {
-        const query = `
-            INSERT INTO workspace_files (path, name, content, is_dir, updated_at)
-            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-            ON CONFLICT (path) DO UPDATE 
-            SET content = EXCLUDED.content, updated_at = CURRENT_TIMESTAMP;
-        `;
-        await pool.query(query, [filePath, name, content, isDir]);
+        console.log(`[StorageService] 💾 Saving to DB: ${filePath} (isDir: ${isDir})`);
+
+        try {
+            // Ensure parent directories exist in DB
+            if (filePath.includes('/')) {
+                const parts = filePath.split('/');
+                for (let i = 1; i < parts.length; i++) {
+                    const parentPath = parts.slice(0, i).join('/');
+                    const parentName = parts[i - 1];
+                    // Fast upsert for parents (don't need content)
+                    await supabase.from('workspace_files').upsert({
+                        path: parentPath,
+                        name: parentName,
+                        is_dir: true,
+                        user_id: DEFAULT_USER_ID,
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'user_id,path' });
+                }
+            }
+
+            // Use upsert to handle both insert and update atomically.
+            const { data, error } = await supabase
+                .from('workspace_files')
+                .upsert({
+                    path: filePath,
+                    name,
+                    content,
+                    is_dir: isDir,
+                    updated_at: new Date().toISOString(),
+                    user_id: DEFAULT_USER_ID
+                }, {
+                    onConflict: 'user_id,path'
+                })
+                .select();
+
+            if (error) {
+                console.error(`[StorageService] ❌ Upsert Error for ${filePath}:`, error.message);
+                throw error;
+            }
+
+            console.log(`[StorageService] ✅ Successfully saved ${filePath} in DB`);
+            return data;
+
+        } catch (err) {
+            console.error(`[StorageService] ❌ Catch Error saving ${filePath}:`, err.message);
+            throw err;
+        }
     }
 
     async deleteFile(filePath) {
-        // Recursive delete for directories
-        await pool.query('DELETE FROM workspace_files WHERE path = $1 OR path LIKE $2', [filePath, `${filePath}/%`]);
+        const { error } = await supabase
+            .from('workspace_files')
+            .delete()
+            .match({ user_id: DEFAULT_USER_ID })
+            .or(`path.eq.${filePath},path.like.${filePath}/%`);
+
+        if (error) throw error;
     }
 
     async renameFile(oldPath, newPath) {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+        console.log(`[StorageService] 📂 Renaming: ${oldPath} -> ${newPath}`);
 
-            // Re-map all children if it's a directory
-            const res = await client.query('SELECT * FROM workspace_files WHERE path = $1 OR path LIKE $2', [oldPath, `${oldPath}/%`]);
+        // Fetch original file and its children belonging to this user
+        const { data, error: fetchError } = await supabase
+            .from('workspace_files')
+            .select('*')
+            .match({ user_id: DEFAULT_USER_ID })
+            .or(`path.eq.${oldPath},path.like.${oldPath}/%`);
 
-            for (const row of res.rows) {
-                const subPath = row.path.replace(oldPath, newPath);
-                const name = subPath.split('/').pop();
+        if (fetchError) {
+            console.error('[StorageService] ❌ Fetch Error during rename:', fetchError.message);
+            throw fetchError;
+        }
 
-                await client.query('DELETE FROM workspace_files WHERE path = $1', [row.path]);
-                await client.query(
-                    'INSERT INTO workspace_files (path, name, content, is_dir, updated_at) VALUES ($1, $2, $3, $4, $5)',
-                    [subPath, name, row.content, row.is_dir, row.updated_at]
-                );
+        for (const row of data) {
+            const subPath = row.path.replace(oldPath, newPath);
+            const name = subPath.split('/').pop();
+
+            console.log(`[StorageService] 📝 Moving: ${row.path} -> ${subPath}`);
+
+            // Use the resilient saveFile logic (upsert) to handle potential exists-already cases
+            await this.saveFile(subPath, name, row.content, row.is_dir);
+
+            // Delete old path if it was actually moved
+            if (row.path !== subPath) {
+                await supabase
+                    .from('workspace_files')
+                    .delete()
+                    .match({ path: row.path, user_id: DEFAULT_USER_ID });
             }
-
-            await client.query('COMMIT');
-        } catch (e) {
-            await client.query('ROLLBACK');
-            throw e;
-        } finally {
-            client.release();
         }
     }
 
     async readFile(filePath) {
-        const res = await pool.query('SELECT content FROM workspace_files WHERE path = $1', [filePath]);
-        return res.rows[0]?.content || '';
+        const { data, error } = await supabase
+            .from('workspace_files')
+            .select('content')
+            .match({ path: filePath, user_id: DEFAULT_USER_ID })
+            .single();
+
+        if (error && error.code !== 'PGRST116') throw error;
+        return data?.content || '';
     }
 
     buildTree(rows) {
         const nodes = {};
         const tree = [];
 
+        // First pass: create all nodes
         rows.forEach(row => {
-            const node = {
+            nodes[row.path] = {
                 id: row.path,
                 name: row.name,
                 isDir: row.is_dir,
@@ -159,9 +200,13 @@ class StorageService {
                 children: row.is_dir ? [] : undefined,
                 isOpen: false
             };
-            nodes[row.path] = node;
+        });
 
+        // Second pass: connect children to parents
+        rows.forEach(row => {
+            const node = nodes[row.path];
             const parts = row.path.split('/');
+
             if (parts.length === 1) {
                 tree.push(node);
             } else {
@@ -169,13 +214,60 @@ class StorageService {
                 if (nodes[parentPath]) {
                     nodes[parentPath].children.push(node);
                 } else {
-                    // Orphaned or root level
+                    // Fallback: if parent not in DB, show at root but keep as intended hierarchy
                     tree.push(node);
                 }
             }
         });
 
         return tree;
+    }
+
+    startWatcher() {
+        const workspaceDir = path.join(os.tmpdir(), 'teachgrid-workspace');
+        if (!fs.existsSync(workspaceDir)) fs.mkdirSync(workspaceDir, { recursive: true });
+
+        console.log(`[StorageService] 👀 Watching for changes in: ${workspaceDir}`);
+
+        this.watcher = chokidar.watch(workspaceDir, {
+            ignored: [
+                /(^|[\/\\])\../, // ignore dotfiles
+                /node_modules/,   // ignore node_modules
+                /\.git/          // ignore git
+            ],
+            persistent: true,
+            ignoreInitial: true,
+        });
+
+        this.watcher
+            .on('add', (absPath) => this.handleFsEvent('add', absPath))
+            .on('change', (absPath) => this.handleFsEvent('change', absPath))
+            .on('unlink', (absPath) => this.handleFsEvent('unlink', absPath))
+            .on('addDir', (absPath) => this.handleFsEvent('addDir', absPath))
+            .on('unlinkDir', (absPath) => this.handleFsEvent('unlinkDir', absPath));
+    }
+
+    async handleFsEvent(event, absPath) {
+        const workspaceDir = path.join(os.tmpdir(), 'teachgrid-workspace');
+        const relPath = path.relative(workspaceDir, absPath).replace(/\\/g, '/');
+        const name = path.basename(absPath);
+
+        console.log(`[StorageService] 📂 FS Event [${event}]: ${relPath}`);
+
+        try {
+            if (event === 'add' || event === 'change' || event === 'addDir') {
+                const isDir = event === 'addDir';
+                let content = null;
+                if (!isDir) {
+                    content = fs.readFileSync(absPath, 'utf8');
+                }
+                await this.saveFile(relPath, name, content, isDir);
+            } else if (event === 'unlink' || event === 'unlinkDir') {
+                await this.deleteFile(relPath);
+            }
+        } catch (err) {
+            console.error(`[StorageService] ❌ Failed to sync FS event ${event} for ${relPath}:`, err.message);
+        }
     }
 }
 

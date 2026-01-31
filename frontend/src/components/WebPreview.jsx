@@ -1,16 +1,16 @@
 import React, { useMemo } from 'react';
 
-export default function WebPreview({ fileName, content, files }) {
+export default function WebPreview({ fileName, content, files, fullPath }) {
     const fullHtml = useMemo(() => {
         // 1. Flatten VFS
         const vfs = {};
         const flatten = (items, path = "") => {
             items.forEach(item => {
-                const fullPath = path ? `${path}/${item.name}` : item.name;
+                const fullPathStr = path ? `${path}/${item.name}` : item.name;
                 if (item.isDir) {
-                    if (item.children) flatten(item.children, fullPath);
+                    if (item.children) flatten(item.children, fullPathStr);
                 } else {
-                    vfs[fullPath] = item.content || "";
+                    vfs[fullPathStr] = item.content || "";
                 }
             });
         };
@@ -37,9 +37,13 @@ export default function WebPreview({ fileName, content, files }) {
         // 4. Bundler Script
         const escapeScriptTags = (str) => str.replace(/<\/script>/g, '<\\/script>');
 
+        const entryPoint = fullPath || fileName;
+
         const bundlerScript = `
             (function() {
                 window.__VFS__ = ${escapeScriptTags(JSON.stringify(vfs))};
+                window.__ENTRY__ = "${entryPoint.endsWith('.html') ? '' : entryPoint}"; 
+                window.__IS_HTML_MODE__ = ${entryPoint.endsWith('.html')};
                 window.__CACHE__ = {};
                 window.__EXTERNAL_DEPS__ = {};
                 
@@ -52,16 +56,35 @@ export default function WebPreview({ fileName, content, files }) {
                     document.body.appendChild(div);
                 }
 
-                function resolve(path) {
-                    let clean = path.replace(/^\\.\\//, "").replace(/^\\//, "");
+                function normalizePath(path) {
+                    const parts = path.split('/');
+                    const stack = [];
+                    for (const part of parts) {
+                        if (part === '.' || part === '') continue;
+                        if (part === '..') stack.pop();
+                        else stack.push(part);
+                    }
+                    return stack.join('/');
+                }
+
+                function resolve(path, currentDir = "") {
+                    let target = path;
+                    if (path.startsWith('./') || path.startsWith('../')) {
+                        target = normalizePath(currentDir + "/" + path);
+                    } else if (path.startsWith('/')) {
+                        target = normalizePath(path);
+                    }
+                    
                     const tryPaths = [
-                        clean, clean + ".jsx", clean + ".js", clean + ".vue", clean + ".svelte",
-                        "src/" + clean, "src/" + clean + ".jsx", "src/" + clean + ".js", "src/" + clean + ".vue"
+                        target, 
+                        target + ".jsx", target + ".js", target + ".vue", target + ".svelte",
+                        "src/" + target, "src/" + target + ".jsx", "src/" + target + ".js", "src/" + target + ".vue"
                     ];
+                    
                     return tryPaths.find(p => window.__VFS__[p] !== undefined);
                 }
 
-                function require(path) {
+                function require(path, currentFile = "") {
                     if (path === 'react') return window.React;
                     if (path === 'react-dom' || path === 'react-dom/client') return window.ReactDOM;
                     if (path === 'vue') return window.Vue;
@@ -69,10 +92,14 @@ export default function WebPreview({ fileName, content, files }) {
                     if (path === 'axios') return window.axios;
                     
                     if (window.__EXTERNAL_DEPS__[path]) return window.__EXTERNAL_DEPS__[path];
+                    
                     if (path.endsWith('.css')) return {};
+                    if (path.match(/\\.(svg|png|jpg|jpeg|gif|webp)$/i)) return path; 
 
-                    const resolved = resolve(path);
-                    if (!resolved) throw new Error("Module not found: " + path);
+                    const currentDir = currentFile.split('/').slice(0, -1).join('/');
+                    const resolved = resolve(path, currentDir);
+                    
+                    if (!resolved) throw new Error("Module not found: " + path + (currentFile ? " (imported by " + currentFile + ")" : ""));
                     if (window.__CACHE__[resolved]) return window.__CACHE__[resolved];
 
                     const code = window.__VFS__[resolved];
@@ -81,9 +108,7 @@ export default function WebPreview({ fileName, content, files }) {
                     try {
                         let finalCode = "";
                         if (resolved.endsWith('.vue')) {
-                            // Basic Vue SFC support (requires global Vue + compiler)
-                            // For now, assume composition API in JS if logic is there
-                            throw new Error("SFC (.vue) compilation requires backend support or heavy browser compilers. Use JSX or Setup API in .js for now.");
+                            throw new Error("SFC (.vue) compilation requires backend support.");
                         } else {
                             const transformed = Babel.transform(code, {
                                 presets: ['react', 'env'],
@@ -100,8 +125,9 @@ export default function WebPreview({ fileName, content, files }) {
                                 .replace(/import\\s+['"](.*?)['"];?/g, 'require("$1");');
                         }
 
+                        const customRequire = (p) => require(p, resolved);
                         const fn = new Function('require', 'module', 'exports', 'React', 'ReactDOM', 'Vue', finalCode);
-                        fn(require, module, module.exports, window.React, window.ReactDOM, window.Vue);
+                        fn(customRequire, module, module.exports, window.React, window.ReactDOM, window.Vue);
                         
                         window.__CACHE__[resolved] = module.exports.default || module.exports;
                         return window.__CACHE__[resolved];
@@ -121,14 +147,63 @@ export default function WebPreview({ fileName, content, files }) {
                             attempts++;
                         }
 
-                        const entries = ['src/main.jsx', 'src/main.js', 'main.jsx', 'main.js', 'src/App.jsx', 'App.jsx', 'src/index.js', 'index.js'];
-                        const entry = entries.find(p => window.__VFS__[p]);
-                        if (entry) {
-                            require(entry);
-                            if (status) {
-                                status.style.opacity = '0';
-                                setTimeout(() => status.style.display = 'none', 300);
+                        if (window.__IS_HTML_MODE__) {
+                             log("HTML Mode active. Skipping React auto-boot.");
+                             if (status) { status.style.opacity = '0'; setTimeout(() => status.style.display = 'none', 300); }
+                             return;
+                        }
+
+                        const keepIds = ['root', 'app', 'ide-status'];
+                        Array.from(document.body.children).forEach(child => {
+                            if (child.tagName !== 'SCRIPT' && !keepIds.includes(child.id)) {
+                                child.remove();
                             }
+                        });
+
+                        const potentialEntries = [
+                            window.__ENTRY__, 
+                            'src/main.jsx', 'src/main.js', 'main.jsx', 'main.js', 'src/App.jsx', 'App.jsx', 'src/index.js', 'index.js'
+                        ];
+                        const entry = potentialEntries.find(p => p && (window.__VFS__[p] || resolve(p)));
+                        
+                        if (entry) {
+                            log("Booting from: " + entry);
+                            const exported = require(entry);
+                            
+                            let root = document.getElementById('root') || document.getElementById('app');
+                            if (!root) {
+                                root = document.createElement('div');
+                                root.id = 'root';
+                                document.body.appendChild(root);
+                            }
+
+                            // Only auto-mount if the root is empty AND we got a valid component.
+                            // If the root is NOT empty, it means index.js likely called root.render() itself!
+                            if (root.innerHTML.trim() === '') {
+                                const Component = exported.default || exported;
+                                if (Component && typeof Component === 'function') {
+                                    log("Auto-mounting component...");
+                                    const React = window.React;
+                                    const ReactDOM = window.ReactDOM;
+                                    if (ReactDOM.createRoot) {
+                                        ReactDOM.createRoot(root).render(React.createElement(Component));
+                                    } else {
+                                        ReactDOM.render(React.createElement(Component), root);
+                                    }
+                                } else {
+                                    // If no component, it's ONLY an error if the root is STILL empty.
+                                    // React apps usually mount themselves in index.js, so this is often fine.
+                                    setTimeout(() => {
+                                        if (root.innerHTML.trim() === '') {
+                                             showError("Entry file " + entry + " executed, but we couldn't find a component to mount and the #root element is empty.\\n\\nMake sure you either export a component or call root.render() manually in your entry file.");
+                                        }
+                                    }, 500);
+                                }
+                            }
+
+                            if (status) { status.style.opacity = '0'; setTimeout(() => status.style.display = 'none', 300); }
+                        } else {
+                            showError("Could not find entry point. Checked: " + potentialEntries.join(", "));
                         }
                     } catch (err) {
                         showError(err.stack || err.message);
@@ -140,8 +215,13 @@ export default function WebPreview({ fileName, content, files }) {
         `;
 
         // 5. HTML Construction
-        let htmlTemplate = vfs['index.html'] || vfs['public/index.html'] || vfs['src/index.html'] ||
-            '<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body><div id="root"></div><div id="app"></div></body></html>';
+        let htmlTemplate;
+        if (fileName.endsWith('.html') && vfs[fileName]) {
+            htmlTemplate = vfs[fileName];
+        } else {
+            htmlTemplate = vfs['index.html'] || vfs['public/index.html'] || vfs['frontend/public/index.html'] || vfs['src/index.html'] ||
+                '<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body><div id="root"></div><div id="app"></div></body></html>';
+        }
 
         htmlTemplate = htmlTemplate.replace(/<script\s+[^>]*src=["'](.*?)["'][^>]*><\/script>/gi, (match, src) => {
             const clean = src.replace(/^\.?\//, "");
@@ -194,12 +274,13 @@ export default function WebPreview({ fileName, content, files }) {
         }
 
         return finalHtml;
-    }, [content, fileName, files]);
+    }, [content, fileName, files, fullPath]);
 
     return (
         <div style={{ width: '100%', height: '100%', background: 'white', overflow: 'hidden' }}>
             <iframe
                 srcDoc={fullHtml}
+                key={fileName}
                 style={{ width: '100%', height: '100%', border: 'none' }}
                 title="Web Preview"
                 sandbox="allow-scripts"
