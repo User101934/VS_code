@@ -26,7 +26,7 @@ export async function executeCode(socket, payload, sessionData) {
     console.log(`[Executor] ✅ Final execution mode: ${mode.toUpperCase()}`);
 
     if (language === 'terminal') {
-        return executeLocalCode(socket, payload);
+        return executeLocalCode(socket, payload, sessionData.userId);
     }
 
     if (!LANGUAGES[language]) {
@@ -36,7 +36,7 @@ export async function executeCode(socket, payload, sessionData) {
     }
 
     if (mode === 'local') {
-        return executeLocalCode(socket, payload);
+        return executeLocalCode(socket, payload, sessionData.userId);
     }
 
     if (mode === 'piston') {

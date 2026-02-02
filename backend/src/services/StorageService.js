@@ -7,73 +7,19 @@ import chokidar from 'chokidar';
 
 dotenv.config();
 
-const DEFAULT_USER_ID = 'user_system';
-
 class StorageService {
     async init() {
-        console.log('[StorageService] Initializing Supabase storage...');
-
-        try {
-            const { count, error } = await supabase
-                .from('workspace_files')
-                .select('*', { count: 'exact', head: true })
-                .eq('user_id', DEFAULT_USER_ID);
-
-            if (error) throw error;
-
-            console.log(`[StorageService] Current Supabase row count for ${DEFAULT_USER_ID}: ${count}`);
-
-            if (count === 0) {
-                console.log('[StorageService] Starting disk-to-DB migration...');
-                const projectRoot = path.join(os.tmpdir(), 'teachgrid-workspace');
-                if (fs.existsSync(projectRoot)) {
-                    await this.migrateFromDisk(projectRoot, '');
-                    console.log('[StorageService] Migration complete!');
-                } else {
-                    console.log('[StorageService] Temp workspace not found, skipping migration.');
-                    fs.mkdirSync(projectRoot, { recursive: true });
-                }
-            }
-
-            // Start file watcher for real-time sync (crucial for terminal use)
-            this.startWatcher();
-        } catch (err) {
-            console.error('[StorageService] Initialization error:', err.message);
-        }
+        console.log('[StorageService] Initializing...');
+        // Start file watcher for real-time sync
+        this.startWatcher();
     }
 
-    async migrateFromDisk(absPath, relPath) {
-        const items = fs.readdirSync(absPath);
-        for (const item of items) {
-            try {
-                if (item === 'node_modules' || item === '.git') continue; // Skip heavy folders
-
-                const itemAbs = path.join(absPath, item);
-                const itemRel = relPath ? `${relPath}/${item}` : item;
-                const stats = fs.statSync(itemAbs);
-                const isDir = stats.isDirectory();
-
-                let content = null;
-                if (!isDir) {
-                    content = fs.readFileSync(itemAbs, 'utf8');
-                }
-
-                await this.saveFile(itemRel, item, content, isDir);
-
-                if (isDir) {
-                    await this.migrateFromDisk(itemAbs, itemRel);
-                }
-            } catch (itemErr) {
-                console.error(`[Migration] Failed for ${item}:`, itemErr.message);
-            }
-        }
-    }
-
-    async listFiles() {
+    async listFiles(userId) {
+        if (!userId) throw new Error("userId is required for listFiles");
         const { data, error } = await supabase
             .from('workspace_files')
             .select('*')
-            .eq('user_id', DEFAULT_USER_ID)
+            .eq('user_id', userId)
             .order('is_dir', { ascending: false })
             .order('path', { ascending: true });
 
@@ -81,8 +27,9 @@ class StorageService {
         return this.buildTree(data);
     }
 
-    async saveFile(filePath, name, content, isDir) {
-        console.log(`[StorageService] 💾 Saving to DB & Bucket: ${filePath} (isDir: ${isDir})`);
+    async saveFile(userId, filePath, name, content, isDir) {
+        if (!userId) return; // passive fail or throw
+        console.log(`[StorageService] 💾 Saving for [${userId}]: ${filePath} (isDir: ${isDir})`);
 
         try {
             // 1. Ensure parent directories exist in DB (Index logic)
@@ -95,7 +42,7 @@ class StorageService {
                         path: parentPath,
                         name: parentName,
                         is_dir: true,
-                        user_id: DEFAULT_USER_ID,
+                        user_id: userId,
                         updated_at: new Date().toISOString()
                     }, { onConflict: 'user_id,path' });
                 }
@@ -104,26 +51,21 @@ class StorageService {
             // 2. Upload to Supabase Storage (Visual Folder logic)
             try {
                 if (isDir) {
-                    // Supabase Storage needs an object to "show" a folder. 
-                    // We create a hidden .placeholder file.
                     await supabase.storage
                         .from('workspace')
-                        .upload(`${DEFAULT_USER_ID}/${filePath}/.placeholder`, '', {
+                        .upload(`${userId}/${filePath}/.placeholder`, '', {
                             upsert: true,
                             contentType: 'text/plain'
                         });
-                    console.log(`[StorageService] 📁 Created folder placeholder for: ${filePath}`);
                 } else if (content !== null) {
                     const { error: bucketError } = await supabase.storage
                         .from('workspace')
-                        .upload(`${DEFAULT_USER_ID}/${filePath}`, content, {
+                        .upload(`${userId}/${filePath}`, content, {
                             upsert: true,
                             contentType: 'text/plain'
                         });
                     if (bucketError) {
                         console.warn(`[StorageService] ⚠️ Bucket upload failed:`, bucketError.message);
-                    } else {
-                        console.log(`[StorageService] ☁️ Uploaded ${filePath} to bucket.`);
                     }
                 }
             } catch (bucketCatch) {
@@ -139,7 +81,7 @@ class StorageService {
                     content,
                     is_dir: isDir,
                     updated_at: new Date().toISOString(),
-                    user_id: DEFAULT_USER_ID
+                    user_id: userId
                 }, {
                     onConflict: 'user_id,path'
                 })
@@ -150,7 +92,6 @@ class StorageService {
                 throw error;
             }
 
-            console.log(`[StorageService] ✅ Successfully saved ${filePath} in DB/Bucket`);
             return data;
 
         } catch (err) {
@@ -159,31 +100,33 @@ class StorageService {
         }
     }
 
-    async deleteFile(filePath) {
+    async deleteFile(userId, filePath) {
+        if (!userId) return;
         // 1. Delete from Table
         const { error } = await supabase
             .from('workspace_files')
             .delete()
-            .match({ user_id: DEFAULT_USER_ID })
+            .match({ user_id: userId })
             .or(`path.eq.${filePath},path.like.${filePath}/%`);
 
         if (error) throw error;
 
-        // 2. Delete from Bucket (Ignore errors if bucket isn't setup)
+        // 2. Delete from Bucket
         try {
             await supabase.storage
                 .from('workspace')
-                .remove([`${DEFAULT_USER_ID}/${filePath}`]);
+                .remove([`${userId}/${filePath}`]);
         } catch (e) { }
     }
 
-    async renameFile(oldPath, newPath) {
-        console.log(`[StorageService] 📂 Renaming: ${oldPath} -> ${newPath}`);
+    async renameFile(userId, oldPath, newPath) {
+        if (!userId) return;
+        console.log(`[StorageService] 📂 Renaming [${userId}]: ${oldPath} -> ${newPath}`);
 
         const { data, error: fetchError } = await supabase
             .from('workspace_files')
             .select('*')
-            .match({ user_id: DEFAULT_USER_ID })
+            .match({ user_id: userId })
             .or(`path.eq.${oldPath},path.like.${oldPath}/%`);
 
         if (fetchError) throw fetchError;
@@ -192,19 +135,20 @@ class StorageService {
             const subPath = row.path.replace(oldPath, newPath);
             const name = subPath.split('/').pop();
 
-            await this.saveFile(subPath, name, row.content, row.is_dir);
+            await this.saveFile(userId, subPath, name, row.content, row.is_dir);
 
             if (row.path !== subPath) {
-                await this.deleteFile(row.path);
+                await this.deleteFile(userId, row.path);
             }
         }
     }
 
-    async readFile(filePath) {
+    async readFile(userId, filePath) {
+        if (!userId) return '';
         const { data, error } = await supabase
             .from('workspace_files')
             .select('content')
-            .match({ path: filePath, user_id: DEFAULT_USER_ID })
+            .match({ path: filePath, user_id: userId })
             .single();
 
         if (error && error.code !== 'PGRST116') throw error;
@@ -212,6 +156,7 @@ class StorageService {
     }
 
     buildTree(rows) {
+        if (!rows) return [];
         const nodes = {};
         const tree = [];
 
@@ -239,7 +184,6 @@ class StorageService {
                 if (nodes[parentPath]) {
                     nodes[parentPath].children.push(node);
                 } else {
-                    // Fallback: if parent not in DB, show at root but keep as intended hierarchy
                     tree.push(node);
                 }
             }
@@ -262,6 +206,7 @@ class StorageService {
             ],
             persistent: true,
             ignoreInitial: true,
+            depth: 10 // restrict depth if needed
         });
 
         this.watcher
@@ -273,11 +218,19 @@ class StorageService {
     }
 
     async handleFsEvent(event, absPath) {
+        // Expected structure: .../teachgrid-workspace/{userId}/{path/to/file}
         const workspaceDir = path.join(os.tmpdir(), 'teachgrid-workspace');
-        const relPath = path.relative(workspaceDir, absPath).replace(/\\/g, '/');
-        const name = path.basename(absPath);
+        const relativeToRoot = path.relative(workspaceDir, absPath).replace(/\\/g, '/');
+        
+        // Extract userID (first segment)
+        const parts = relativeToRoot.split('/');
+        if (parts.length < 2) return; // Change in root or direct child of root (which should be user folders)
+        
+        const userId = parts[0];
+        const filePath = parts.slice(1).join('/');
+        const name = parts[parts.length - 1];
 
-        console.log(`[StorageService] 📂 FS Event [${event}]: ${relPath}`);
+        // console.log(`[StorageService] 📂 FS Event [${event}]: User=${userId}, Path=${filePath}`);
 
         try {
             if (event === 'add' || event === 'change' || event === 'addDir') {
@@ -286,12 +239,12 @@ class StorageService {
                 if (!isDir) {
                     content = fs.readFileSync(absPath, 'utf8');
                 }
-                await this.saveFile(relPath, name, content, isDir);
+                await this.saveFile(userId, filePath, name, content, isDir);
             } else if (event === 'unlink' || event === 'unlinkDir') {
-                await this.deleteFile(relPath);
+                await this.deleteFile(userId, filePath);
             }
         } catch (err) {
-            console.error(`[StorageService] ❌ Failed to sync FS event ${event} for ${relPath}:`, err.message);
+            console.error(`[StorageService] ❌ Failed to sync FS event ${event} for ${relativeToRoot}:`, err.message);
         }
     }
 }

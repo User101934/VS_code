@@ -319,7 +319,17 @@ export default function IDELayout() {
     }, [activeTerminalId]);
 
     useEffect(() => {
-        socketRef.current = io(BACKEND_URL);
+        // Generate or retrieve persistent User ID
+        let userId = localStorage.getItem('teachgrid_user_id');
+        if (!userId) {
+            userId = 'user_' + generateId();
+            localStorage.setItem('teachgrid_user_id', userId);
+        }
+        console.log('[Frontend] Connecting with User ID:', userId);
+
+        socketRef.current = io(BACKEND_URL, {
+            query: { userId }
+        });
 
         socketRef.current.on("connect", () => {
             socketRef.current.emit("terminal:init");
@@ -454,7 +464,7 @@ export default function IDELayout() {
         const rawCmd = cmd.trim();
         // Allow empty commands if sending newline to stdin
         if (rawCmd === '' && terminals.find(t => t.id === activeTerminalId)?.busy) {
-            if (socketRef.current?.connected) socketRef.current.emit("terminal:input", '\n');
+            if (socketRef.current?.connected) socketRef.current.emit("terminal:input", '\r\n');
             return;
         }
         if (!rawCmd) return;
@@ -479,8 +489,8 @@ export default function IDELayout() {
             if (rawCmd === '\x03') {
                 socketRef.current.emit("terminal:input", rawCmd);
             } else {
-                // Otherwise append newline specifically
-                socketRef.current.emit("terminal:input", rawCmd + '\n');
+                // Use \r\n for Windows CMD PTY compatibility during interactive sessions
+                socketRef.current.emit("terminal:input", rawCmd + '\r\n');
             }
         }
     };

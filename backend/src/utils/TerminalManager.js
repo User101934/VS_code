@@ -38,10 +38,11 @@ class TerminalManager {
 
     // Initialize a session with default CWD
     // Initialize a session with default CWD
-    createSession(socketId, socket) {
+    createSession(socketId, socket, userId) {
         if (!this.sessions[socketId]) {
-            // Default to Temp Workspace
-            const root = path.join(os.tmpdir(), 'teachgrid-workspace');
+            // Default to Temp Workspace namespaced by userId
+            const safeUserId = userId || 'anonymous';
+            const root = path.join(os.tmpdir(), 'teachgrid-workspace', safeUserId);
             if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
             this.sessions[socketId] = {
                 cwd: root,
