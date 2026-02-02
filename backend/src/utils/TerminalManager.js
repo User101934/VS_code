@@ -75,20 +75,22 @@ class TerminalManager {
 
         if (!trimmedCmd) return;
 
-        // --- Aliases for Windows CMD ---
-        const aliases = {
-            'ls': 'dir /b',
-            'dir': 'dir /b',
-            'll': 'dir',
-            'cat': 'type',
-            'rm': 'del',
-            'clear': 'cls',
-            'pwd': 'echo %cd%'
-        };
-        const parts = trimmedCmd.split(' ');
-        if (aliases[parts[0]]) {
-            parts[0] = aliases[parts[0]];
-            trimmedCmd = parts.join(' ');
+        // --- Aliases ---
+        if (process.platform === 'win32') {
+            const aliases = {
+                'ls': 'dir /b',
+                'dir': 'dir /b',
+                'll': 'dir',
+                'cat': 'type',
+                'rm': 'del',
+                'clear': 'cls',
+                'pwd': 'echo %cd%'
+            };
+            const parts = trimmedCmd.split(' ');
+            if (aliases[parts[0]]) {
+                parts[0] = aliases[parts[0]];
+                trimmedCmd = parts.join(' ');
+            }
         }
 
         // --- Handle 'cd' internally ---
