@@ -45,17 +45,29 @@ class StorageService {
             `);
             console.log('[StorageService] PostgreSQL Table initialized');
 
-            // 3. Migration: If DB is empty, sync from local disk
+            // 3. Sync Strategy
+            const projectRoot = path.join(os.tmpdir(), 'teachgrid-workspace');
+
             const rowCheck = await client.query('SELECT count(*) FROM workspace_files');
-            console.log(`[StorageService] Current DB row count: ${rowCheck.rows[0].count}`);
-            if (parseInt(rowCheck.rows[0].count) <= 1) { // Allow 1 for partial previous attempts
-                console.log('[StorageService] Starting disk-to-DB migration...');
-                const projectRoot = path.join(os.tmpdir(), 'teachgrid-workspace');
+            const rowCount = parseInt(rowCheck.rows[0].count);
+            console.log(`[StorageService] Current DB row count: ${rowCount}`);
+
+            if (rowCount > 0) {
+                // Database has files -> Restore to disk (Hydration)
+                // This ensures that if the container restarted and /tmp was cleared, 
+                // we get our files back from Postgres.
+                console.log('[StorageService] DB has files. Restoring to local workspace...');
+                await this.restoreToDisk(projectRoot);
+                console.log('[StorageService] Restore complete.');
+            } else {
+                // Database is empty -> Seed from disk (Initial Migration)
+                // This happens on the very first run if the user has pre-existing files in the docker image.
+                console.log('[StorageService] DB empty. Checking for local files to seed...');
                 if (fs.existsSync(projectRoot)) {
                     await this.migrateFromDisk(projectRoot, '');
                     console.log('[StorageService] Migration complete!');
                 } else {
-                    console.log('[StorageService] Temp workspace not found at', projectRoot);
+                    console.log('[StorageService] No local files to seed. Workspace is empty.');
                 }
             }
         } catch (err) {
@@ -82,13 +94,41 @@ class StorageService {
                 }
 
                 await this.saveFile(itemRel, item, content, isDir);
-                console.log(`[Migration] Synced: ${itemRel}`);
+                // console.log(`[Migration] Synced: ${itemRel}`);
 
                 if (isDir) {
                     await this.migrateFromDisk(itemAbs, itemRel);
                 }
             } catch (itemErr) {
                 console.error(`[Migration] Failed for ${item}:`, itemErr.message);
+            }
+        }
+    }
+
+    async restoreToDisk(rootPath) {
+        if (!fs.existsSync(rootPath)) fs.mkdirSync(rootPath, { recursive: true });
+
+        // Get all files (folders first to ensure structure)
+        const res = await pool.query('SELECT * FROM workspace_files ORDER BY is_dir DESC');
+
+        for (const row of res.rows) {
+            try {
+                const fullPath = path.join(rootPath, row.path);
+
+                if (row.is_dir) {
+                    if (!fs.existsSync(fullPath)) {
+                        fs.mkdirSync(fullPath, { recursive: true });
+                    }
+                } else {
+                    const dir = path.dirname(fullPath);
+                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+                    // Only write if file doesn't exist or is different?
+                    // For now, overwrite to ensure consistency with DB (DB is Source of Truth)
+                    fs.writeFileSync(fullPath, row.content || '');
+                }
+            } catch (err) {
+                console.error(`[Restore] Failed to restore ${row.path}:`, err.message);
             }
         }
     }

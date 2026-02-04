@@ -68,6 +68,8 @@ export default function IDELayout() {
     const [isSidebarVisible, setIsSidebarVisible] = useState(true);
     const [activeDB, setActiveDB] = useState(null); // { id, dbName, table }
     const [executionMode, setExecutionMode] = useState("auto");
+    const [previewOutput, setPreviewOutput] = useState(null);
+    const [isCapturingPreview, setIsCapturingPreview] = useState(false);
 
     const socketRef = useRef(null);
     const activeTerminalIdRef = useRef(activeTerminalId);
@@ -76,6 +78,11 @@ export default function IDELayout() {
         () => openFiles.find(f => f.id === activeFileId) || null,
         [openFiles, activeFileId]
     );
+
+    useEffect(() => {
+        setPreviewOutput(null);
+        setIsCapturingPreview(false);
+    }, [activeFileId]);
 
     /* ================= HELPERS ================= */
 
@@ -162,6 +169,29 @@ export default function IDELayout() {
 
     const handleRunCode = useCallback(() => {
         if (!activeFile) return;
+
+        // --- WEB INTERCEPTOR ---
+        const ext = activeFile.name.split('.').pop().toLowerCase();
+        if (['html', 'htm', 'jsx', 'tsx', 'vue', 'svelte'].includes(ext)) {
+            setShowPreview(true);
+            setPreviewOutput(null);
+            setActivePanel("terminal");
+            setTerminals(prev => prev.map(t =>
+                t.id === activeTerminalId ? {
+                    ...t,
+                    output: [...t.output, `▶ Starting Web Preview for ${activeFile.name}...`]
+                } : t
+            ));
+            return;
+        }
+
+        // --- PHP / SERVER-SIDE PREVIEW ---
+        if (ext === 'php') {
+            setShowPreview(true);
+            setIsCapturingPreview(true);
+            setPreviewOutput(""); // Clear previous output
+        }
+
         if (isExecuting) {
             alert("Code is already running. Please wait.");
             return;
@@ -302,6 +332,9 @@ export default function IDELayout() {
         activeTerminalIdRef.current = activeTerminalId;
     }, [activeTerminalId]);
 
+    const isCapturingRef = useRef(false);
+    useEffect(() => { isCapturingRef.current = isCapturingPreview; }, [isCapturingPreview]);
+
     useEffect(() => {
         socketRef.current = io(BACKEND_URL);
 
@@ -311,10 +344,16 @@ export default function IDELayout() {
         });
 
         socketRef.current.on("output", data => {
-            const lines = data.toString().split(/\r?\n/).map(stripAnsi);
+            const strData = data.toString();
+            const lines = strData.split(/\r?\n/).map(stripAnsi);
+
             setTerminals(prev => prev.map(t =>
                 t.id === activeTerminalIdRef.current ? { ...t, output: [...t.output, ...lines] } : t
             ));
+
+            if (isCapturingRef.current) {
+                setPreviewOutput(prev => (prev || "") + strData);
+            }
         });
 
         socketRef.current.on("files:list:response", (fileTree) => {
@@ -325,7 +364,10 @@ export default function IDELayout() {
             setOpenFiles(prev => prev.map(f => f.id === path ? { ...f, content } : f));
         });
 
-        socketRef.current.on("execution_complete", () => setIsExecuting(false));
+        socketRef.current.on("execution_complete", () => {
+            setIsExecuting(false);
+            setIsCapturingPreview(false);
+        });
 
         socketRef.current.on("terminal:status", ({ busy }) => {
             setTerminals(prev => prev.map(t => t.id === activeTerminalIdRef.current ? { ...t, busy } : t));
@@ -629,6 +671,8 @@ export default function IDELayout() {
                         {showPreview && activeFile && (
                             <div className="side-pane preview-pane">
                                 <WebPreview
+                                    executionOutput={previewOutput}
+                                    isExecuting={isExecuting}
                                     fileName={activeFile.name}
                                     content={activeFile.content}
                                     files={files}

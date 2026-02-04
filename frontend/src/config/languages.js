@@ -21,5 +21,7 @@ export const LANGUAGES = {
     json: { ext: 'json', name: 'JSON', icon: '📋', starter: '{\n  "name": "project",\n  "version": "1.0.0",\n  "description": "Project description"\n}\n' },
     yaml: { ext: 'yaml', name: 'YAML', icon: '📄', starter: 'name: project\nversion: 1.0.0\ndescription: Project description\n' },
     markdown: { ext: 'md', name: 'Markdown', icon: '📝', starter: '# Project Title\n\n## Description\n\nWrite your project description here.\n\n## Features\n\n- Feature 1\n- Feature 2\n- Feature 3\n' },
+    jsx: { ext: 'jsx', name: 'React', icon: '⚛️', starter: 'import React from "react";\n\nexport default function App() {\n    return <h1>Hello React</h1>;\n}\n' },
+    tsx: { ext: 'tsx', name: 'React TS', icon: '⚛️', starter: 'import React from "react";\n\nexport default function App() {\n    return 1>Hello React</h1>;\n}\n' },
     text: { ext: 'txt', name: 'Text', icon: '📄', starter: '' }
 };

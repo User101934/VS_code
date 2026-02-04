@@ -76,8 +76,8 @@ class TerminalManager {
 
         // --- Aliases for Windows CMD ---
         const aliases = {
-            'ls': 'dir /b',
-            'dir': 'dir /b',
+            'ls': 'dir',
+            'dir': 'dir',
             'll': 'dir',
             'cat': 'type',
             'rm': 'del',
@@ -103,7 +103,10 @@ class TerminalManager {
             const newPath = path.resolve(session.cwd, targetDir);
 
             // SANDBOX CHECK
-            if (!newPath.startsWith(session.projectRoot)) {
+            const normalizedNewPath = path.normalize(newPath).toLowerCase();
+            const normalizedRoot = path.normalize(session.projectRoot).toLowerCase();
+
+            if (!normalizedNewPath.startsWith(normalizedRoot)) {
                 socket.emit('output', `Error: Access denied (Sandbox Restriction). Cannot navigate outside project root.\r\n`);
                 return;
             }
@@ -126,7 +129,7 @@ class TerminalManager {
 
         // --- Handle 'cls' / 'clear' ---
         if (trimmedCmd === 'cls' || trimmedCmd === 'clear') {
-            socket.emit('output', '\x1b[2J\x1b[0f'); // ANSI clear
+            socket.emit('terminal:clear');
             return;
         }
 

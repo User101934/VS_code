@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y \
     make \
     bash \
     curl \
+    php-cli \
+    php-cgi \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -7,8 +7,8 @@ export const LANGUAGES = {
         image: 'python:3.11-slim',
         workDir: '/workspace',
         file: 'main.py',
-        command: ['python', '-u', 'main.py'],
-        localCommand: ['python', '-X', 'utf8', '-u', 'main.py'],
+        command: ['python3', '-u', 'main.py'],
+        localCommand: ['python3', '-X', 'utf8', '-u', 'main.py'],
         timeout: 30000
     },
     javascript: {
@@ -40,7 +40,7 @@ export const LANGUAGES = {
         workDir: '/workspace',
         file: 'main.c',
         command: ['bash', '-c', 'gcc -o main main.c && ./main'],
-        localCommand: ['gcc -o main main.c && main'],
+        localCommand: ['gcc -o main main.c && ./main'],
         timeout: 30000
     },
     cpp: {
@@ -48,7 +48,7 @@ export const LANGUAGES = {
         workDir: '/workspace',
         file: 'main.cpp',
         command: ['bash', '-c', 'g++ -o main main.cpp && ./main'],
-        localCommand: ['g++ -o main main.cpp && main'],
+        localCommand: ['g++ -o main main.cpp && ./main'],
         timeout: 30000
     },
     csharp: {
@@ -72,7 +72,7 @@ export const LANGUAGES = {
         workDir: '/workspace',
         file: 'main.rs',
         command: ['bash', '-c', 'rustc main.rs && ./main'],
-        localCommand: ['rustc main.rs && main'],
+        localCommand: ['rustc main.rs && ./main'],
         timeout: 45000
     },
     php: {
@@ -80,7 +80,7 @@ export const LANGUAGES = {
         workDir: '/workspace',
         file: 'main.php',
         command: ['php', 'main.php'],
-        localCommand: ['php', 'main.php'],
+        localCommand: ['php-cgi', 'main.php'],
         timeout: 30000
     },
     ruby: {

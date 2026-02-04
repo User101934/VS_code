@@ -87,8 +87,8 @@ export async function executeLocalCode(socket, payload) {
     // Set encoding for Python to handle Unicode characters on Windows
     const env = {
         ...process.env,
-        LANG: 'en_US.UTF-8',
-        LC_ALL: 'en_US.UTF-8'
+        LANG: 'C.UTF-8',
+        LC_ALL: 'C.UTF-8'
     };
 
     if (language === 'python') {
@@ -96,6 +96,15 @@ export async function executeLocalCode(socket, payload) {
         env.PYTHONUTF8 = '1';
     } else if (language === 'java') {
         env.JAVA_TOOL_OPTIONS = '-Dfile.encoding=UTF-8';
+    } else if (language === 'php') {
+        // Inject Common Gateway Interface (CGI) variables for scripts that expect them
+        env.REQUEST_METHOD = 'GET';
+        env.REQUEST_METHOD = 'GET';
+        env.REDIRECT_STATUS = '200'; // Required for php-cgi
+        env.SCRIPT_FILENAME = fileName; // Required for some php-cgi configurations
+        // You can add more mock variables here if needed
+        // env.SERVER_NAME = 'localhost';
+        // env.SERVER_PORT = '80';
     }
 
     const ptyProcess = pty.spawn(shell, args, {

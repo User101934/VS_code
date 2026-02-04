@@ -13,7 +13,7 @@ export async function executeCode(socket, payload, sessionData) {
     // "Heavy" languages (with local dependency management) default to Local.
     // Others default to Piston for broad support.
     if (mode === 'auto') {
-        if (['python', 'javascript', 'java'].includes(language)) {
+        if (['python', 'javascript', 'java', 'c', 'cpp', 'php'].includes(language)) {
             mode = 'local';
         } else {
             mode = 'piston';
